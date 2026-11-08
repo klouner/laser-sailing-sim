@@ -131,6 +131,33 @@
     <div class="hud-cap">Вид сверху: север вверху</div>
   </div>
 
+  <div id="touch">
+    <div class="t-actions">
+      <button id="t-pause" class="t-btn" title="Пауза">⏸</button>
+      <button id="t-cam" class="t-btn" title="Камера">📷</button>
+      <button id="t-tack" class="t-btn">⟲ Оверштаг</button>
+      <button id="t-auto" class="t-btn">Автошкот</button>
+      <button id="t-panel" class="t-btn" title="Настройки">☰</button>
+    </div>
+    <div class="t-wind">
+      <button id="t-windL" class="t-btn">↺ −10°</button>
+      <button id="t-windChip" class="t-chip">Ветер 0° С · 10 уз</button>
+      <button id="t-windR" class="t-btn">+10° ↻</button>
+    </div>
+    <div class="t-pads">
+      <div id="t-rudder" class="pad pad-h">
+        <div class="pad-label"><span>← Руль →</span><b id="t-rudder-val">прямо</b></div>
+        <div class="pad-track"><div class="pad-center"></div><div class="pad-thumb" id="t-rudder-thumb"></div></div>
+        <div class="pad-sub">тяни влево/вправо — отпусти, вернётся</div>
+      </div>
+      <div id="t-sheet" class="pad pad-v">
+        <div class="pad-label"><span>Шкот</span><b id="t-sheet-val">45°</b></div>
+        <div class="pad-track"><div class="pad-thumb" id="t-sheet-thumb"></div></div>
+        <div class="pad-sub">▲ подобрать<br>▼ потравить</div>
+      </div>
+    </div>
+  </div>
+
   <div id="loading"><div class="spinner"></div><div>Загружаем лодку…</div></div>
 </div>
 <script type="module" src="js/main.js"></script>

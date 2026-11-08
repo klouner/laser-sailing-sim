@@ -71,19 +71,56 @@ details[open] summary::before{transform:rotate(90deg)}
 .spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.12);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-@media (max-width:900px){
-  .icon-btn{display:block;margin-left:auto}
-  #topbar{left:12px;right:12px;top:12px;flex-wrap:wrap;gap:8px}
-  .brand{padding:8px 12px}
+/* ---------- сенсорное управление ---------- */
+#touch{display:none;position:absolute;left:0;right:0;bottom:0;z-index:6;padding:8px 10px calc(10px + env(safe-area-inset-bottom));flex-direction:column;gap:8px;pointer-events:none}
+#touch>*{pointer-events:auto}
+.t-actions,.t-wind{display:flex;gap:6px;justify-content:center;flex-wrap:nowrap}
+.t-btn{flex:0 1 auto;min-width:44px;height:42px;padding:0 12px;border-radius:12px;background:rgba(13,20,36,.78);backdrop-filter:blur(8px);border:1px solid var(--border);color:var(--text);font:600 13px Inter,system-ui,sans-serif;cursor:pointer;touch-action:manipulation;white-space:nowrap}
+.t-btn.active{background:var(--accent);color:#06121f;border-color:transparent}
+.t-chip{flex:1;height:42px;border-radius:12px;background:rgba(13,20,36,.78);backdrop-filter:blur(8px);border:1px solid rgba(59,130,246,.5);color:#bfdbfe;font:600 13px Inter,system-ui,sans-serif;touch-action:manipulation}
+.t-pads{display:flex;gap:10px;align-items:stretch}
+.pad{background:rgba(13,20,36,.78);backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:16px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;touch-action:none;user-select:none;-webkit-user-select:none}
+.pad-h{flex:1}
+.pad-v{width:96px;align-items:center}
+.pad-label{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:#cbd5e1;width:100%}
+.pad-label b{color:var(--text);font-size:13px}
+.pad-sub{font-size:10px;color:var(--muted);text-align:center;line-height:1.25}
+.pad-track{position:relative;background:rgba(255,255,255,.1);border-radius:999px}
+.pad-h .pad-track{height:56px;width:100%}
+.pad-v .pad-track{width:56px;flex:1;min-height:120px}
+.pad-center{position:absolute;left:50%;top:8px;bottom:8px;width:2px;margin-left:-1px;background:rgba(255,255,255,.35);border-radius:1px}
+.pad-thumb{position:absolute;width:48px;height:48px;border-radius:50%;background:var(--accent);box-shadow:0 2px 10px rgba(0,0,0,.35),0 0 0 4px rgba(56,189,248,.22);top:50%;left:50%;transform:translate(-50%,-50%)}
+.pad-v .pad-thumb{background:#f59e0b;box-shadow:0 2px 10px rgba(0,0,0,.35),0 0 0 4px rgba(245,158,11,.22)}
+.pad.active .pad-track{background:rgba(255,255,255,.18)}
+#hud.min #minimap{display:none}
+#hud.min .hud-cap{display:block}
+
+@media (max-width:900px), (pointer:coarse) and (max-width:1200px){
+  #touch{display:flex}
+  .icon-btn{display:none}
+  #topbar{left:10px;right:10px;top:10px;flex-wrap:wrap;gap:6px}
+  .brand{padding:6px 10px}
+  .brand .logo{font-size:20px}
+  .brand .title{font-size:14px}
   .brand .subtitle{display:none}
-  .status{flex-basis:100%;max-width:none;padding:8px 12px}
+  .status{flex-basis:100%;max-width:none;padding:7px 10px}
   .pos-name{font-size:15px}
   .tack{font-size:11px}
-  .hint{font-size:12px}
-  #panel{top:auto;bottom:0;right:0;left:0;width:auto;max-height:64vh;padding:0 12px 12px;border-radius:var(--radius) var(--radius) 0 0;transform:translateY(calc(100% + 20px));transition:transform .3s}
+  .hint{font-size:12px;margin-top:2px}
+  #panel{top:auto;bottom:0;right:0;left:0;width:auto;max-height:70vh;padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:rgba(9,14,26,.92);border-radius:var(--radius) var(--radius) 0 0;transform:translateY(calc(100% + 20px));transition:transform .3s;z-index:7}
+  #panel::before{content:"";display:block;width:44px;height:4px;border-radius:2px;background:rgba(255,255,255,.3);margin:0 auto 2px}
   #panel.open{transform:none}
-  #panel.open ~ #hud{display:none}
-  #hud{bottom:auto;top:150px;left:12px;padding:5px}
-  #minimap{width:150px;height:150px}
+  #panel.open ~ #touch{display:none}
+  #panel .card{background:rgba(255,255,255,.05)}
+  #panel .foot{display:none}
+  #hud{bottom:auto;top:118px;left:10px;padding:4px}
+  #minimap{width:132px;height:132px}
   .hud-cap{display:none}
+  #hud.min{padding:6px 10px}
+  #hud.min .hud-cap{font-size:11px}
+}
+@media (max-width:900px) and (max-height:700px){
+  #hud{display:none}
+  .pad-v .pad-track{min-height:90px}
+  .pad-sub{display:none}
 }

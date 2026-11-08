@@ -85,14 +85,18 @@ const ui = {
   autoSheet: $('autoSheet'), lockHeading: $('lockHeading'), rudderReturn: $('rudderReturn'),
 };
 const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
+function setRudder(v) { ctl.rudder = THREE.MathUtils.clamp(v, -35, 35); ui.rudder.value = Math.round(ctl.rudder); autopilot = null; }
+function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, 0, 90); ui.sheet.value = Math.round(ctl.sheet); ctl.autoSheet = false; ui.autoSheet.checked = false; $('t-auto').classList.remove('active'); }
+function setWindFrom(v) { ctl.windFrom = ((v % 360) + 360) % 360; ui.windFrom.value = Math.round(ctl.windFrom); }
+function setAutoSheet(v) { ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
 
 ui.windFrom.addEventListener('input', () => { ctl.windFrom = +ui.windFrom.value; });
 ui.windSpeed.addEventListener('input', () => { ctl.windSpeed = +ui.windSpeed.value; });
 ui.heading.addEventListener('input', () => { state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; });
-ui.sheet.addEventListener('input', () => { ctl.sheet = +ui.sheet.value; ui.autoSheet.checked = false; ctl.autoSheet = false; });
+ui.sheet.addEventListener('input', () => { setSheet(+ui.sheet.value); });
 ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autopilot = null; });
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
-ui.autoSheet.addEventListener('change', () => { ctl.autoSheet = ui.autoSheet.checked; });
+ui.autoSheet.addEventListener('change', () => { setAutoSheet(ui.autoSheet.checked); });
 ui.lockHeading.addEventListener('change', () => { ctl.lockHeading = ui.lockHeading.checked; });
 
 $('btn-pause').addEventListener('click', togglePause);
@@ -111,11 +115,47 @@ for (const [id, key] of [['showTrue', 'trueWind'], ['showApp', 'appWind'], ['sho
   $(id).addEventListener('change', (e) => { show[key] = e.target.checked; });
 }
 $('btn-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
+$('hud').addEventListener('click', () => $('hud').classList.toggle('min'));
+
+// ---------- сенсорное управление ----------
+let padActive = false;
+function bindPad(el, thumb, horizontal, onValue, onRelease, holds = false) {
+  const track = el.querySelector('.pad-track');
+  let id = null;
+  const apply = (e) => {
+    const r = track.getBoundingClientRect();
+    if (horizontal) { const half = r.width / 2 - 24; onValue(THREE.MathUtils.clamp((e.clientX - (r.left + r.width / 2)) / half, -1, 1)); }
+    else { const usable = r.height - 48; onValue(THREE.MathUtils.clamp((e.clientY - r.top - 24) / usable, 0, 1)); }
+  };
+  el.addEventListener('pointerdown', (e) => { id = e.pointerId; el.setPointerCapture(id); el.classList.add('active'); if (holds) padActive = true; apply(e); e.preventDefault(); });
+  el.addEventListener('pointermove', (e) => { if (e.pointerId === id) apply(e); });
+  const end = (e) => { if (e.pointerId !== id) return; id = null; el.classList.remove('active'); if (holds) padActive = false; onRelease && onRelease(); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+}
+bindPad($('t-rudder'), $('t-rudder-thumb'), true, (k) => setRudder(k * 35), null, true);
+bindPad($('t-sheet'), $('t-sheet-thumb'), false, (k) => setSheet(k * 90));
+$('t-pause').addEventListener('click', togglePause);
+$('t-cam').addEventListener('click', () => { const order = ['chase', 'top', 'side', 'free']; setCamera(order[(order.indexOf(camMode) + 1) % 4]); });
+$('t-tack').addEventListener('click', () => $('btn-tack').click());
+$('t-auto').addEventListener('click', () => setAutoSheet(!ctl.autoSheet));
+$('t-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
+$('t-windChip').addEventListener('click', () => $('panel').classList.add('open'));
+$('t-windL').addEventListener('click', () => setWindFrom(ctl.windFrom - 10));
+$('t-windR').addEventListener('click', () => setWindFrom(ctl.windFrom + 10));
+// закрыть шторку тапом по сцене
+canvas.addEventListener('pointerdown', () => $('panel').classList.remove('open'));
+function updateTouch() {
+  const th = $('t-rudder-thumb'); th.style.left = (50 + ctl.rudder / 35 * 50 * (1 - 48 / Math.max(48, th.parentElement.clientWidth))) + '%';
+  const ts = $('t-sheet-thumb'); const trk = ts.parentElement; const usable = Math.max(1, trk.clientHeight - 48);
+  ts.style.top = (24 + ctl.sheetShown / 90 * usable) + 'px';
+}
 
 function togglePause() {
   ctl.paused = !ctl.paused;
   $('btn-pause').textContent = ctl.paused ? '▶ Продолжить' : '⏸ Пауза';
   $('btn-pause').classList.toggle('active', ctl.paused);
+  $('t-pause').textContent = ctl.paused ? '▶' : '⏸';
+  $('t-pause').classList.toggle('active', ctl.paused);
 }
 function reset() {
   const s = createState();
@@ -140,7 +180,7 @@ function handleKeys(dt) {
   const left = keys.ArrowLeft || keys.KeyA, right = keys.ArrowRight || keys.KeyD;
   const inS = keys.ArrowUp || keys.KeyW, outS = keys.ArrowDown || keys.KeyS;
   if (left || right) { autopilot = null; ctl.rudder = THREE.MathUtils.clamp(ctl.rudder + (right ? 1 : -1) * 70 * dt, -35, 35); ui.rudder.value = Math.round(ctl.rudder); }
-  else if (ui.rudderReturn.checked && !autopilot && document.activeElement !== ui.rudder) {
+  else if (ui.rudderReturn.checked && !autopilot && !padActive && document.activeElement !== ui.rudder) {
     const k = Math.min(1, dt * 5); ctl.rudder += (0 - ctl.rudder) * k; if (Math.abs(ctl.rudder) < 0.3) ctl.rudder = 0; ui.rudder.value = Math.round(ctl.rudder);
   }
   if (inS || outS) { ctl.autoSheet = false; ui.autoSheet.checked = false; ctl.sheet = THREE.MathUtils.clamp(ctl.sheet + (outS ? 1 : -1) * 40 * dt, 0, 90); ui.sheet.value = Math.round(ctl.sheet); }
@@ -195,6 +235,9 @@ function updateUI(out, dt) {
   if (ctl.autoSheet) ui.sheet.value = Math.round(out.sheet);
   const r = Math.round(ctl.rudder);
   $('v-rudder').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо →' : '← влево'}`;
+  $('t-rudder-val').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо' : 'влево'}`;
+  $('t-sheet-val').textContent = `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' авто' : '');
+  $('t-windChip').textContent = `Ветер ${Math.round(ctl.windFrom)}° ${compassName(ctl.windFrom)} · ${fmt(ctl.windSpeed, 0)} уз`;
   if (document.activeElement !== ui.rudder) ui.rudder.value = r;
 
   $('pos-name').textContent = out.pos.name;
@@ -217,7 +260,9 @@ let t = 0;
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
-    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.setSize(w, h, false); camera.aspect = w / h; const portrait = w / h < 0.9; camera.fov = portrait ? 68 : 50;
+    if (portrait) camera.setViewOffset(w, h, 0, Math.round(h * 0.14), w, h); else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
   }
 }
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
@@ -272,6 +317,8 @@ function frame() {
   const fOrigin = boat.root.position.clone().add(boatForward().multiplyScalar(0.1)); fOrigin.y = 1.6;
   arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.6, fOrigin.z + out.forceWorldZ * fs), `Сила ${Math.round(out.Fmag)} Н`, dt);
 
+  ctl.sheetShown = out.sheet;
+  updateTouch();
   updateCamera(dt);
   updateUI(out, dt);
   drawMinimap(state, out, ctl, show);
