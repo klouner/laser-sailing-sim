@@ -229,13 +229,21 @@ function limb(mat, r) {
   g.userData.set = (a, b) => { const d = b.clone().sub(a); const L = d.length(); g.position.copy(a); g.quaternion.setFromUnitVectors(Y, d.normalize()); cyl.scale.y = L; cyl.position.y = L / 2; };
   return g;
 }
+// Трос: ломаная по точкам; sags[i] — провисание i-го отрезка (м, вниз по y)
 function rope(parent, mat, r = 0.0075) {
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
   mesh.castShadow = true; parent.add(mesh);
-  return (points) => {
+  return (points, sags = null) => {
     const path = new THREE.CurvePath();
-    for (let i = 0; i < points.length - 1; i++) path.add(new THREE.LineCurve3(points[i], points[i + 1]));
-    const g = new THREE.TubeGeometry(path, (points.length - 1) * 4, r, 6, false);
+    let segs = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], c = points[i + 1], s = sags ? (sags[i] || 0) : 0;
+      if (s > 0.004) {
+        const ctrl = a.clone().lerp(c, 0.5); ctrl.y -= 2 * s; // квадратичная Безье: провис в середине = s
+        path.add(new THREE.QuadraticBezierCurve3(a, ctrl, c)); segs += 8;
+      } else { path.add(new THREE.LineCurve3(a, c)); segs += 2; }
+    }
+    const g = new THREE.TubeGeometry(path, segs, r, 6, false);
     mesh.geometry.dispose(); mesh.geometry = g;
   };
 }
@@ -454,6 +462,7 @@ export function createBoat() {
 
   // ---------- обновление ----------
   let flutterPhase = 0;
+  const sheetState = { slack: 0, ease: 0 };
   const P = {
     hip: new THREE.Vector3(), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
     elbowA: new THREE.Vector3(), handA: new THREE.Vector3(), elbowB: new THREE.Vector3(), handB: new THREE.Vector3(), tmp: new THREE.Vector3(),
@@ -546,8 +555,12 @@ export function createBoat() {
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
     const extLen = THREE.MathUtils.clamp(d.length(), 0.5, 1.3);
     extension.scale.y = extLen / 1.1; extension.position.x = extLen / 2; extGrip.position.x = extLen - 0.1;
-    // шкот от блока в переднюю руку
-    handSheet([blockTop, P.handB.clone().add(new THREE.Vector3(0, -0.03, 0))]);
+    // шкот от блока в переднюю руку: на попутных курсах матрос держит длинную слабину
+    const handPt = P.handB.clone().add(new THREE.Vector3(0, -0.03, 0));
+    const midY = (blockTop.y + handPt.y) / 2;
+    const wantSag = 0.03 + 0.1 * sheetState.ease + 0.12 * sheetState.slack;
+    const sag = Math.min(wantSag, midY - (floorY + 0.05));
+    handSheet([blockTop, handPt], [Math.max(0, sag)]);
   }
 
   function update(state, out, ctl, dt, t) {
@@ -569,9 +582,19 @@ export function createBoat() {
     const bEnd2 = boomBlockEnd.clone().add(new THREE.Vector3(0.09, 0, 0)).applyAxisAngle(Y, rot).add(mastBase);
     const bMid = boomBlockMid.clone().applyAxisAngle(Y, rot).add(mastBase);
     const tv = travP.clone().add(new THREE.Vector3(0, 0.03, 0));
-    sheetRope([tv.clone().add(new THREE.Vector3(0, 0, 0.02)), bEnd, tv.clone().add(new THREE.Vector3(0, 0, -0.02)), bEnd2, bMid, blockTop]);
+    // натяжение: гик упирается в ограничитель шкота и парус тянет → шкот натянут; иначе провисает
+    const restrained = Math.abs(Math.abs(state.boom) - out.sheet) < 3 && !out.luffing;
+    const load = restrained ? THREE.MathUtils.clamp(out.Fmag / 90, 0, 1) : 0;
+    const slack = 1 - load;
+    sheetState.slack += (slack - sheetState.slack) * Math.min(1, dt * 3);
+    const sl = sheetState.slack;
+    sheetRope(
+      [tv.clone().add(new THREE.Vector3(0, 0, 0.02)), bEnd, tv.clone().add(new THREE.Vector3(0, 0, -0.02)), bEnd2, bMid, blockTop],
+      [0.01 + 0.14 * sl, 0.01 + 0.14 * sl, 0.02 + 0.16 * sl, 0.02 + 0.22 * sl, 0.0]
+    );
 
     rudderPivot.rotation.y = ctl.rudder * DEG;
+    sheetState.ease += (out.sheet / 90 - sheetState.ease) * Math.min(1, dt * 3);
     if (sailor.visible) updateSailor(state, dt);
   }
 
