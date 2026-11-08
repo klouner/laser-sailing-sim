@@ -1,0 +1,16 @@
+[Unit]
+Description=Laser 3D leaderboard API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Environment=PORT=8787
+Environment=DATA=/var/lib/laser-leaderboard/top.json
+Environment=ORIGIN=https://klouner.github.io
+ExecStart=/usr/bin/node /opt/laser-leaderboard/leaderboard-server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
