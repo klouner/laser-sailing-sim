@@ -29,11 +29,19 @@ async function gformGet() {
   const head = rows[0].map(s => s.toLowerCase());
   let iN = head.findIndex(s => s.includes('имя') || s.includes('name')), iT = head.findIndex(s => s.includes('время') || s.includes('time')), iD = head.findIndex(s => s.includes('отметка') || s.includes('timestamp'));
   if (iN < 0) iN = 1; if (iT < 0) iT = 2; if (iD < 0) iD = 0;
-  const list = rows.slice(1).map(r => ({ name: String(r[iN] || '').trim().slice(0, 18) || 'Без имени', time: parseFloat(String(r[iT] || '').replace(',', '.')), date: String(r[iD] || '').slice(0, 10) }));
+  // формат: либо отдельная колонка времени, либо «Имя | 151.2» в одной ячейке
+  const list = rows.slice(1).map(r => {
+    let name = String(r[iN] || '').trim(), time = parseFloat(String(r[iT] || '').replace(',', '.'));
+    const sep = name.lastIndexOf('|');
+    if (sep >= 0) { const t2 = parseFloat(name.slice(sep + 1).trim().replace(',', '.')); if (!isNaN(t2)) { time = t2; name = name.slice(0, sep).trim(); } }
+    return { name: name.slice(0, 18) || 'Без имени', time, date: String(r[iD] || '').slice(0, 10) };
+  });
   return sortTrim(list, 50);
 }
 async function gformSubmit(entry) {
-  const fd = new FormData(); fd.append(GFORM.nameEntry, entry.name); fd.append(GFORM.timeEntry, String(entry.time));
+  const fd = new FormData();
+  if (GFORM.timeEntry) { fd.append(GFORM.nameEntry, entry.name); fd.append(GFORM.timeEntry, String(entry.time)); }
+  else fd.append(GFORM.nameEntry, `${entry.name.replace(/\|/g, '/')} | ${entry.time}`);
   await fetch(GFORM.action, { method: 'POST', mode: 'no-cors', body: fd });
   await new Promise(res => setTimeout(res, 1800));
   try { const list = await gformGet(); if (!list.some(e => e.name === entry.name && Math.abs(e.time - entry.time) < 0.05)) list.push(entry); return sortTrim(list); } catch (e) { return null; }
