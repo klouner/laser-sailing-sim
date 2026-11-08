@@ -179,8 +179,9 @@ function bindPad(el, thumb, horizontal, onValue, onRelease, holds = false) {
   let id = null;
   const apply = (e) => {
     const r = track.getBoundingClientRect();
-    if (horizontal) { const half = r.width / 2 - 24; onValue(THREE.MathUtils.clamp((e.clientX - (r.left + r.width / 2)) / half, -1, 1)); }
-    else { const usable = r.height - 48; onValue(THREE.MathUtils.clamp((e.clientY - r.top - 24) / usable, 0, 1)); }
+    const th = thumb.offsetWidth || 36;
+    if (horizontal) { const half = r.width / 2 - th / 2; onValue(THREE.MathUtils.clamp((e.clientX - (r.left + r.width / 2)) / half, -1, 1)); }
+    else { const usable = r.height - th; onValue(THREE.MathUtils.clamp((e.clientY - r.top - th / 2) / usable, 0, 1)); }
   };
   el.addEventListener('pointerdown', (e) => { id = e.pointerId; el.setPointerCapture(id); el.classList.add('active'); if (holds) padActive = true; apply(e); e.preventDefault(); });
   el.addEventListener('pointermove', (e) => { if (e.pointerId === id) apply(e); });
@@ -200,9 +201,9 @@ $('t-windR').addEventListener('click', () => setWindFrom(ctl.windFrom + 10));
 // закрыть шторку тапом по сцене
 canvas.addEventListener('pointerdown', () => $('panel').classList.remove('open'));
 function updateTouch() {
-  const th = $('t-rudder-thumb'); th.style.left = (50 + ctl.rudder / 35 * 50 * (1 - 48 / Math.max(48, th.parentElement.clientWidth))) + '%';
-  const ts = $('t-sheet-thumb'); const trk = ts.parentElement; const usable = Math.max(1, trk.clientHeight - 48);
-  ts.style.top = (24 + ctl.sheetShown / 90 * usable) + 'px';
+  const th = $('t-rudder-thumb'); const tw = th.offsetWidth || 36; th.style.left = (50 + ctl.rudder / 35 * 50 * (1 - tw / Math.max(tw, th.parentElement.clientWidth))) + '%';
+  const ts = $('t-sheet-thumb'); const trk = ts.parentElement; const tsz = ts.offsetHeight || 36; const usable = Math.max(1, trk.clientHeight - tsz);
+  ts.style.top = (tsz / 2 + ctl.sheetShown / 90 * usable) + 'px';
 }
 
 function togglePause() {
@@ -330,7 +331,7 @@ function resize() {
   layoutOverlays(w);
   if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
     renderer.setSize(w, h, false); camera.aspect = w / h; const portrait = w / h < 0.9; camera.fov = portrait ? 68 : 50;
-    if (portrait) camera.setViewOffset(w, h, 0, Math.round(h * 0.14), w, h); else camera.clearViewOffset();
+    if (portrait) camera.setViewOffset(w, h, 0, Math.round(h * 0.07), w, h); else camera.clearViewOffset();
     camera.updateProjectionMatrix();
   }
 }
