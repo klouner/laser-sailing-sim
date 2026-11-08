@@ -183,7 +183,7 @@ details[open] summary::before{transform:rotate(90deg)}
   .status-main{gap:6px}
   .pos-name{font-size:10px;padding:1px 7px}
   .tack{font-size:10px}
-  .hint{font-size:11.5px;margin-top:3px;line-height:1.32;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .hint{font-size:11.5px;margin-top:3px;line-height:1.32}
   .t-actions,.t-wind{gap:5px}
   .t-btn{height:34px;min-width:38px;padding:0 10px;font-size:11px}
   .t-chip{height:34px;font-size:11px}
@@ -206,7 +206,7 @@ details[open] summary::before{transform:rotate(90deg)}
   .trainbar{padding:7px 10px;gap:8px;border-radius:12px;max-width:none}
   .tb-head b{font-size:12.5px}
   .tb-time{font-size:17px}
-  .tb-goal{font-size:11px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tb-goal{font-size:11.5px;line-height:1.35}
   .tb-note{font-size:11px}
   .tb-btns{flex-direction:row}
   .tb-btns .btn{min-width:36px;padding:6px 8px;font-size:11px}

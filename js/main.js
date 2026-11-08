@@ -324,7 +324,18 @@ tb.next.addEventListener('click', () => {
   else startRace();
 });
 $('btn-race').addEventListener('click', () => { startRace(); $('panel').classList.remove('open'); });
-$('btn-course').addEventListener('click', () => { course.showCourse(!course.group.visible); });
+$('btn-course').addEventListener('click', () => {
+  // свободная тренировка на трассе: буи видны, лодка на старте, ветер с севера, без таймера
+  lessons.stop(ctl); course.stop(); mode = 'free'; tb.bar.hidden = true;
+  const s = createState(); Object.assign(state, s);
+  state.x = -14; state.z = 8; state.heading = 45; state.vf = 1.5;
+  ctl.windFrom = 0; ui.windFrom.value = 0; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
+  if (ctl.paused) togglePause();
+  course.showCourse(true); renderLessonList();
+  setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
+  $('panel').classList.remove('open');
+  toast('Буи на воде: оранжевый — 110 м против ветра, синий — у старта', false, 3500);
+});
 $('t-train').addEventListener('click', () => { $('panel').classList.add('open'); $('card-train').scrollIntoView({ block: 'start' }); });
 renderLessonList();
 
