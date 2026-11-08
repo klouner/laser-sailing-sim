@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createBoat, HULL } from './boat.js';
-import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake } from './scene.js';
+import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
 import { createState, defaultControls, step, norm180, compassName, optimalSheet, KN } from './physics.js';
 import { createMinimap } from './hud.js';
 
@@ -307,8 +307,20 @@ function updateUI(out, dt) {
 // ---------- цикл ----------
 const clock = new THREE.Clock();
 let t = 0;
+let labelK = 1;
+function layoutOverlays(w) {
+  const k = THREE.MathUtils.clamp(w / 1100, 0.5, 1);
+  if (Math.abs(k - labelK) > 0.01) {
+    labelK = k; setLabelScale(compass, k);
+    for (const a of Object.values(arrows)) a.setLabelScale(k);
+  }
+  const hud = $('hud');
+  if (w < 900) { const r = $('topbar').getBoundingClientRect(); hud.style.top = Math.round(r.bottom + 8) + 'px'; }
+  else hud.style.top = '';
+}
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  layoutOverlays(w);
   if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
     renderer.setSize(w, h, false); camera.aspect = w / h; const portrait = w / h < 0.9; camera.fov = portrait ? 68 : 50;
     if (portrait) camera.setViewOffset(w, h, 0, Math.round(h * 0.14), w, h); else camera.clearViewOffset();
@@ -353,20 +365,21 @@ function frame() {
   sun.target.position.copy(boat.root.position);
 
   // стрелки
-  const center = boat.root.position.clone(); center.y = 0.75;
+  const center = boat.root.position.clone(); center.y = 0.95;
   const WS = 0.5; // м на 1 м/с ветра
+  const endAt = (vx, vz, R) => { const L = Math.hypot(vx, vz) || 1; return new THREE.Vector3(center.x - vx / L * R, center.y, center.z - vz / L * R); };
   arrows.trueWind.setVisible(show.trueWind, show.labels);
-  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, 0.75, center.z - out.Wz * WS), center, `Ветер ${fmt(ctl.windSpeed, 0)} уз`, dt);
+  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(out.Wx, out.Wz, 1.0), `Ветер ${fmt(ctl.windSpeed, 0)} уз`, dt);
   arrows.appWind.setVisible(show.appWind, show.labels);
-  const appFrom = new THREE.Vector3(center.x - out.Ax * WS, 2.3, center.z - out.Az * WS);
-  const appTo = new THREE.Vector3(center.x, 2.3, center.z);
+  const appFrom = new THREE.Vector3(center.x - out.Ax * WS, 2.4, center.z - out.Az * WS);
+  const appTo = endAt(out.Ax, out.Az, 0.6); appTo.y = 2.4; appFrom.y = 2.4;
   arrows.appWind.set(appFrom, appTo, `Вымпельный ${fmt(out.AWS / KN, 0)} уз`, dt);
   arrows.vel.setVisible(show.vel, show.labels);
-  arrows.vel.set(center, new THREE.Vector3(center.x + out.Vx * 1.3, 0.75, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
+  arrows.vel.set(center, new THREE.Vector3(center.x + out.Vx * 1.3, center.y, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
   arrows.force.setVisible(show.force, show.labels);
   const fs = 0.012;
-  const fOrigin = boat.root.position.clone().add(boatForward().multiplyScalar(0.1)); fOrigin.y = 1.6;
-  arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.6, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
+  const fOrigin = boat.root.position.clone().add(boatForward().multiplyScalar(0.3)); fOrigin.y = 1.7;
+  arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.7, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
 
   ctl.sheetShown = out.sheet;
   updateTouch();

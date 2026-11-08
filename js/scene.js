@@ -118,8 +118,13 @@ export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(10,16,28,0.
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
   const k = 0.012 * scale;
   sp.scale.set(c.width * k, c.height * k, 1);
+  sp.userData.baseScale = sp.scale.clone();
   sp.renderOrder = 10;
   return sp;
+}
+// масштаб всех текстовых спрайтов внутри объекта (для узких экранов)
+export function setLabelScale(obj, k) {
+  obj.traverse((o) => { if (o.isSprite && o.userData.baseScale) o.scale.copy(o.userData.baseScale).multiplyScalar(k); });
 }
 
 // ---------- компасное кольцо на воде ----------
@@ -174,23 +179,27 @@ export function makeCompassRing() {
   return g;
 }
 
-// ---------- стрелка вектора с подписью ----------
+// ---------- объёмная стрелка вектора с подписью ----------
+const _unitY = new THREE.Vector3(0, 1, 0);
 export class VectorArrow {
   constructor(scene, color, label) {
     this.color = color;
-    this.arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, color, 0.5, 0.3);
-    this.arrow.cone.material.depthTest = false; this.arrow.line.material.depthTest = false;
-    this.arrow.cone.renderOrder = 9; this.arrow.line.renderOrder = 9;
-    // подпись: фиксированный холст, перерисовывается при смене текста
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1, emissive: color, emissiveIntensity: 0.25 });
+    this.group = new THREE.Group();
+    this.shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), mat);   // масштабируется
+    this.head = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), mat);
+    this.shaft.castShadow = true; this.head.castShadow = true;
+    this.group.add(this.shaft); this.group.add(this.head);
+    scene.add(this.group);
     this.canvas = document.createElement("canvas"); this.canvas.width = 420; this.canvas.height = 72;
     this.ctx = this.canvas.getContext("2d");
     this.tex = new THREE.CanvasTexture(this.canvas); this.tex.colorSpace = THREE.SRGBColorSpace;
     this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false }));
-    this.label.scale.set(420 * 0.0062, 72 * 0.0062, 1); this.label.renderOrder = 10;
-    this.labelAt = 0.5; this.labelLift = 0.35;
-    this.base = label; this._text = null; this._since = 1;
-    scene.add(this.arrow); scene.add(this.label);
-    this.visible = true;
+    this.label.scale.set(420 * 0.0062, 72 * 0.0062, 1); this.label.userData.baseScale = this.label.scale.clone(); this.label.renderOrder = 10;
+    this.labelAt = 0.5; this.labelLift = 0.35; this.labelScale = 1;
+    this._text = null; this._since = 1;
+    scene.add(this.label);
+    this.visible = true; this.showLabel = true;
     this.draw(label);
   }
   draw(text) {
@@ -204,19 +213,24 @@ export class VectorArrow {
     g.fillText(text, c.width / 2, 38);
     this.tex.needsUpdate = true; this._text = text;
   }
-  // from → to (мировые координаты); text — подпись (обновляется не чаще 4 раз/с)
-  set(from, to, text, dt = 0) {
+  // from → to (мировые координаты)
+  set(from, to, text, dt = 0, thickness = 1) {
     const dir = to.clone().sub(from); const len = dir.length();
-    if (len < 0.15 || !this.visible) { this.arrow.visible = false; this.label.visible = false; return; }
-    this.arrow.visible = true; this.label.visible = this.showLabel !== false;
-    this.arrow.position.copy(from);
-    this.arrow.setDirection(dir.normalize());
-    this.arrow.setLength(len, Math.min(0.6, len * 0.3), Math.min(0.35, len * 0.18));
-    this.label.position.copy(from).lerp(to, this.labelAt); this.label.position.y += this.labelLift;
+    if (len < 0.25 || !this.visible) { this.group.visible = false; this.label.visible = false; return; }
+    this.group.visible = true; this.label.visible = this.showLabel;
+    dir.normalize();
+    const r = 0.035 * thickness, headLen = Math.min(0.38, len * 0.35), headR = 0.11 * thickness;
+    this.group.position.copy(from);
+    this.group.quaternion.setFromUnitVectors(_unitY, dir);
+    const shaftLen = len - headLen;
+    this.shaft.scale.set(r, shaftLen, r); this.shaft.position.y = shaftLen / 2;
+    this.head.scale.set(headR, headLen, headR); this.head.position.y = shaftLen + headLen / 2;
+    this.label.position.copy(from).lerp(to, this.labelAt); this.label.position.y += this.labelLift * this.labelScale;
     this._since += dt;
     if (text && text !== this._text && this._since > 0.25) { this._since = 0; this.draw(text); }
   }
-  setVisible(v, labels = true) { this.visible = v; this.showLabel = labels; if (!v) { this.arrow.visible = false; this.label.visible = false; } }
+  setLabelScale(k) { this.labelScale = k; this.label.scale.copy(this.label.userData.baseScale).multiplyScalar(k); }
+  setVisible(v, labels = true) { this.visible = v; this.showLabel = labels; if (!v) { this.group.visible = false; this.label.visible = false; } }
 }
 
 // ---------- струи ветра ----------
