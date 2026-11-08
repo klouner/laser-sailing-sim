@@ -55,6 +55,11 @@ const water = makeWater(); scene.add(water);
 const compass = makeCompassRing(); scene.add(compass);
 const streaks = makeWindStreaks(); scene.add(streaks);
 const wake = makeWake(); scene.add(wake);
+// фиксированный порядок прозрачных слоёв: вода → кильватер → компас (иначе сортировка по расстоянию даёт мерцание)
+water.renderOrder = 1;
+wake.traverse((o) => { if (o.isMesh) o.renderOrder = 2; });
+compass.traverse((o) => { if (o.isMesh || o.isLine || o.isLineSegments) o.renderOrder = 3; });
+streaks.renderOrder = 4;
 
 const boat = createBoat(); scene.add(boat.root);
 

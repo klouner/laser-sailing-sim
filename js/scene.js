@@ -281,7 +281,7 @@ export function makeWake(n = 64) {
   const items = [];
   for (let i = 0; i < n; i++) {
     const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#ffffff', map: foam, transparent: true, opacity: 0, depthWrite: false }));
-    m.position.y = 0.02; m.visible = false; g.add(m); items.push({ m, age: 99, size: 1 });
+    m.position.y = 0.12; m.visible = false; g.add(m); items.push({ m, age: 99, size: 1 });
   }
   let acc = 0, k = 0;
   g.userData.update = (dt, sternX, sternZ, speed, heading) => {
