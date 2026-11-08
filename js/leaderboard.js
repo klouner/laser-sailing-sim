@@ -1,10 +1,43 @@
 // Таблица лидеров: localStorage по умолчанию; общий вариант — свой сервер (server/) либо публичный JSON-блоб (jsonblob.com)
-import { LEADERBOARD_URL } from './config.js';
+import { LEADERBOARD_URL, GFORM } from './config.js';
 
 const KEY = 'laser3d.leaderboard', NAME_KEY = 'laser3d.name';
 const sortTrim = (list, n = 10) => (Array.isArray(list) ? list : []).filter(e => e && typeof e.time === 'number' && e.time > 20 && e.time < 3600).sort((a, b) => a.time - b.time).slice(0, n);
 const isBlob = /jsonblob\.com\/api\/jsonBlob\//.test(LEADERBOARD_URL);
-export const isShared = !!LEADERBOARD_URL;
+export const isShared = !!LEADERBOARD_URL || !!GFORM;
+
+// ---- Google Форма + Таблица ----
+function parseCSV(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (cell !== '' || row.length) { row.push(cell); rows.push(row); } row = []; cell = ''; if (ch === '\r' && text[i + 1] === '\n') i++; }
+    else cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+async function gformGet() {
+  const r = await fetch(GFORM.csv + (GFORM.csv.includes('?') ? '&' : '?') + '_=' + Date.now(), { cache: 'no-store' });
+  if (!r.ok) throw new Error('csv ' + r.status);
+  const rows = parseCSV(await r.text());
+  if (!rows.length) return [];
+  // ищем колонки по заголовкам, иначе берём 2-ю и 3-ю (после отметки времени)
+  const head = rows[0].map(s => s.toLowerCase());
+  let iN = head.findIndex(s => s.includes('имя') || s.includes('name')), iT = head.findIndex(s => s.includes('время') || s.includes('time')), iD = head.findIndex(s => s.includes('отметка') || s.includes('timestamp'));
+  if (iN < 0) iN = 1; if (iT < 0) iT = 2; if (iD < 0) iD = 0;
+  const list = rows.slice(1).map(r => ({ name: String(r[iN] || '').trim().slice(0, 18) || 'Без имени', time: parseFloat(String(r[iT] || '').replace(',', '.')), date: String(r[iD] || '').slice(0, 10) }));
+  return sortTrim(list, 50);
+}
+async function gformSubmit(entry) {
+  const fd = new FormData(); fd.append(GFORM.nameEntry, entry.name); fd.append(GFORM.timeEntry, String(entry.time));
+  await fetch(GFORM.action, { method: 'POST', mode: 'no-cors', body: fd });
+  await new Promise(res => setTimeout(res, 1800));
+  try { const list = await gformGet(); if (!list.some(e => e.name === entry.name && Math.abs(e.time - entry.time) < 0.05)) list.push(entry); return sortTrim(list); } catch (e) { return null; }
+}
 
 async function blobGet() {
   const r = await fetch(LEADERBOARD_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' });
@@ -25,6 +58,7 @@ function localAdd(entry) {
 }
 
 export async function loadTop() {
+  if (GFORM) { try { return (await gformGet()).slice(0, 10); } catch (e) { /* локально */ } }
   if (LEADERBOARD_URL) {
     try {
       if (isBlob) return (await blobGet()).slice(0, 10);
@@ -36,6 +70,7 @@ export async function loadTop() {
 export function isRecord(top, time) { return top.length < 10 || time < top[top.length - 1].time; }
 export async function submit(name, time) {
   const entry = { name: String(name).slice(0, 18) || 'Без имени', time: Math.round(time * 10) / 10, date: new Date().toISOString().slice(0, 10) };
+  if (GFORM) { try { const r = await gformSubmit(entry); if (r) return r; } catch (e) { /* локально */ } }
   if (LEADERBOARD_URL) {
     try {
       if (isBlob) { const cur = await blobGet(); cur.push(entry); return await blobPut(sortTrim(cur, 50)); }
