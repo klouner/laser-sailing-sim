@@ -103,7 +103,7 @@ export function makeWater() {
 }
 
 // ---------- текстовые спрайты ----------
-export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(10,16,28,0.72)', size = 44, scale = 1 } = {}) {
+export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(12,12,12,0.85)', size = 44, scale = 1 } = {}) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   g.font = `600 ${size}px Inter, Arial, sans-serif`;
@@ -144,27 +144,27 @@ export function makeCompassRing() {
   g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(tickPts), new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6 })));
   const names = [['С', 0], ['В', 90], ['Ю', 180], ['З', 270]];
   for (const [n, b] of names) {
-    const sp = makeTextSprite(n, { size: 56, bg: 'rgba(10,16,28,0.5)', scale: 0.45 });
+    const sp = makeTextSprite(n, { size: 56, bg: 'rgba(12,12,12,0.7)', scale: 0.45 });
     const a = (90 - b) * DEG;
     sp.position.set(Math.cos(a) * (R + 0.45), 0.2, -Math.sin(a) * (R + 0.45));
     g.add(sp);
   }
   // мёртвая зона — сектор ±42°
-  const wedge = new THREE.Mesh(new THREE.CircleGeometry(R - 0.15, 48, -42 * DEG, 84 * DEG), new THREE.MeshBasicMaterial({ color: '#ef4444', transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
+  const wedge = new THREE.Mesh(new THREE.CircleGeometry(R - 0.15, 48, -42 * DEG, 84 * DEG), new THREE.MeshBasicMaterial({ color: '#ff3b30', transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
   wedge.rotation.x = -Math.PI / 2;
   const wedgeG = new THREE.Group(); wedgeG.add(wedge);
-  const wedgeLabel = makeTextSprite('мёртвая зона', { color: '#fecaca', size: 40, scale: 0.45 });
+  const wedgeLabel = makeTextSprite('МЁРТВАЯ ЗОНА', { color: '#ffffff', size: 36, scale: 0.45 });
   wedgeLabel.position.set(R * 0.7, 0.12, 0); wedgeG.add(wedgeLabel);
   g.add(wedgeG);
   // стрелка ветра на кольце (куда дует)
   const shape = new THREE.Shape();
   shape.moveTo(0, 0); shape.lineTo(-0.9, 0.5); shape.lineTo(-0.9, 0.18); shape.lineTo(-2.4, 0.18); shape.lineTo(-2.4, -0.18); shape.lineTo(-0.9, -0.18); shape.lineTo(-0.9, -0.5); shape.closePath();
-  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: '#3b82f6', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: '#0047ff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
   arrow.rotation.x = -Math.PI / 2;
   const arrowG = new THREE.Group(); arrowG.add(arrow);
   arrow.position.x = R + 0.25;
   arrow.rotation.z = Math.PI; // остриё к центру
-  const windLabel = makeTextSprite('ВЕТЕР', { color: '#bfdbfe', size: 44, scale: 0.4 });
+  const windLabel = makeTextSprite('ВЕТЕР', { color: '#ffffff', bg: 'rgba(0,71,255,0.9)', size: 44, scale: 0.4 });
   windLabel.position.set(R + 3.1, 0.2, 0); arrowG.add(windLabel);
   g.add(arrowG);
 
@@ -209,7 +209,8 @@ export class VectorArrow {
     const w = Math.min(c.width, Math.ceil(g.measureText(text).width) + 34);
     g.fillStyle = this.color; g.globalAlpha = 0.9;
     g.beginPath(); g.roundRect((c.width - w) / 2, 4, w, 64, 14); g.fill();
-    g.globalAlpha = 1; g.fillStyle = "#ffffff"; g.textAlign = "center"; g.textBaseline = "middle";
+    const rgb = this.color.match(/\d+/g).map(Number); const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+    g.globalAlpha = 1; g.fillStyle = lum > 0.6 ? "#111111" : "#ffffff"; g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(text, c.width / 2, 38);
     this.tex.needsUpdate = true; this._text = text;
   }

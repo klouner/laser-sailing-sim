@@ -59,10 +59,10 @@ const wake = makeWake(); scene.add(wake);
 const boat = createBoat(); scene.add(boat.root);
 
 const arrows = {
-  trueWind: new VectorArrow(scene, 'rgb(59,130,246)', 'Истинный ветер'),
-  appWind: new VectorArrow(scene, 'rgb(14,165,233)', 'Вымпельный ветер'),
-  vel: new VectorArrow(scene, 'rgb(34,197,94)', 'Скорость лодки'),
-  force: new VectorArrow(scene, 'rgb(249,115,22)', 'Сила на парусе'),
+  trueWind: new VectorArrow(scene, 'rgb(0,71,255)', 'Истинный ветер'),
+  appWind: new VectorArrow(scene, 'rgb(141,176,255)', 'Вымпельный ветер'),
+  vel: new VectorArrow(scene, 'rgb(255,255,255)', 'Скорость лодки'),
+  force: new VectorArrow(scene, 'rgb(255,87,0)', 'Сила на парусе'),
 };
 arrows.trueWind.labelAt = 0.0; arrows.trueWind.labelLift = 0.45;
 arrows.appWind.labelAt = 0.4; arrows.appWind.labelLift = 0.5;
@@ -200,7 +200,7 @@ function updateTouch() {
 
 function togglePause() {
   ctl.paused = !ctl.paused;
-  $('btn-pause').textContent = ctl.paused ? '▶ Продолжить' : '⏸ Пауза';
+  $('btn-pause').textContent = ctl.paused ? 'Продолжить' : 'Пауза';
   $('btn-pause').classList.toggle('active', ctl.paused);
   $('t-pause').textContent = ctl.paused ? '▶' : '⏸';
   $('t-pause').classList.toggle('active', ctl.paused);

@@ -147,58 +147,74 @@ function makeNonSkidTexture() {
   return t;
 }
 
-// Парус: u — от мачты (0) к задней шкаторине (1), v — от гика (0) к фаловому углу (1)
+// Парус: u — от мачты (0) к задней шкаторине (1), v — от гика (0) к фаловому углу (1).
+// Дизайн по мотивам парусов «Силы ветра»: белое полотно, чёрная верхняя панель, номер в кружке, мелкие >>>
+function chevrons(g, x, y, h, color, gap) {
+  g.save(); g.translate(x, y); g.strokeStyle = color; g.lineWidth = h * 0.3; g.lineJoin = 'miter'; g.lineCap = 'butt'; g.miterLimit = 8;
+  for (let i = 0; i < 3; i++) { const x0 = i * gap; g.beginPath(); g.moveTo(x0, -h / 2); g.lineTo(x0 + h * 0.55, 0); g.lineTo(x0, h / 2); g.stroke(); }
+  g.restore();
+}
 function makeSailTexture() {
   const S = 2048;
   const c = document.createElement('canvas'); c.width = S; c.height = S;
   const g = c.getContext('2d');
   const U = (u) => u * S, V = (v) => (1 - v) * S;
   g.fillStyle = '#f4f3ee'; g.fillRect(0, 0, S, S);
-  // лёгкая неравномерность ткани
   for (let i = 0; i < 30; i++) {
     g.fillStyle = `rgba(0,0,0,${0.008 + Math.random() * 0.012})`;
     g.beginPath(); g.ellipse(Math.random() * S, Math.random() * S, 200 + Math.random() * 400, 60 + Math.random() * 120, Math.random() * 3, 0, Math.PI * 2); g.fill();
   }
-  // швы полотнищ: перпендикулярно задней шкаторине (слегка наклонены вверх к мачте)
+  // швы полотнищ, перпендикулярно задней шкаторине
   g.strokeStyle = 'rgba(90,90,90,0.28)'; g.lineWidth = 3;
-  for (let v = 0.1; v < 1; v += 0.1) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0), V(v + 0.085)); g.stroke(); }
-  // латы: 4 штуки
-  g.strokeStyle = 'rgba(60,60,60,0.55)'; g.lineWidth = 9;
-  for (const v of [0.24, 0.44, 0.63, 0.82]) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0.6), V(v + 0.03)); g.stroke(); }
-  // усиления: галсовый, шкотовый, фаловый углы — синие
-  g.fillStyle = '#2b4ea3';
-  g.beginPath(); g.moveTo(U(0), V(0)); g.lineTo(U(0.2), V(0)); g.lineTo(U(0), V(0.17)); g.closePath(); g.fill();
-  g.beginPath(); g.moveTo(U(1), V(0)); g.lineTo(U(0.82), V(0)); g.lineTo(U(1), V(0.14)); g.closePath(); g.fill();
-  g.beginPath(); g.moveTo(U(0), V(1)); g.lineTo(U(1), V(1)); g.lineTo(U(0), V(0.92)); g.closePath(); g.fill();
+  for (let v = 0.1; v < 0.75; v += 0.1) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0), V(v + 0.085)); g.stroke(); }
+  // чёрная верхняя панель
+  g.fillStyle = '#141414';
+  g.beginPath(); g.moveTo(U(0), V(0.80)); g.lineTo(U(1), V(0.715)); g.lineTo(U(1), V(1)); g.lineTo(U(0), V(1)); g.closePath(); g.fill();
+  // номер в кружке — у задней шкаторины панели
+  g.save(); g.translate(U(0.80), V(0.80)); g.rotate(-0.085);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, 92, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#ffffff'; g.font = '500 118px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('5', 0, 6); g.restore();
+  // >>> у передней шкаторины панели
+  g.save(); g.translate(U(0.07), V(0.86)); g.rotate(-0.085); chevrons(g, 0, 0, 56, '#ffffff', 48); g.restore();
+  // латы
+  g.strokeStyle = 'rgba(60,60,60,0.5)'; g.lineWidth = 9;
+  for (const v of [0.24, 0.44, 0.63]) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0.6), V(v + 0.03)); g.stroke(); }
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.moveTo(U(1), V(0.82)); g.lineTo(U(0.6), V(0.85)); g.stroke();
+  // усиления углов — светло-серые
+  g.fillStyle = 'rgba(120,120,120,0.35)';
+  g.beginPath(); g.moveTo(U(0), V(0)); g.lineTo(U(0.16), V(0)); g.lineTo(U(0), V(0.13)); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(U(1), V(0)); g.lineTo(U(0.85), V(0)); g.lineTo(U(1), V(0.11)); g.closePath(); g.fill();
   // окно
   g.fillStyle = 'rgba(170,200,225,0.75)'; g.strokeStyle = 'rgba(70,90,110,0.5)'; g.lineWidth = 4;
   g.beginPath(); g.moveTo(U(0.5), V(0.05)); g.lineTo(U(0.78), V(0.05)); g.lineTo(U(0.78), V(0.145)); g.lineTo(U(0.5), V(0.16)); g.closePath(); g.fill(); g.stroke();
-  // ---- брендинг «Сила ветра»: три шеврона >>> и надпись, наклон вдоль швов ----
-  const tilt = -0.085;
-  g.save(); g.translate(U(0.47), V(0.72)); g.rotate(tilt);
-  g.strokeStyle = '#101317'; g.lineWidth = 70; g.lineJoin = 'miter'; g.lineCap = 'butt'; g.miterLimit = 6;
-  for (let i = 0; i < 3; i++) {
-    const x0 = -350 + i * 270;
-    g.beginPath(); g.moveTo(x0, -180); g.lineTo(x0 + 180, 0); g.lineTo(x0, 180); g.stroke();
-  }
-  g.restore();
-  g.save(); g.translate(U(0.47), V(0.575)); g.rotate(tilt);
-  g.fillStyle = '#101317'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.font = '800 150px Inter, Arial, sans-serif';
-  try { g.letterSpacing = '20px'; } catch (e) {}
-  g.fillText('СИЛА ВЕТРА', 0, 0);
-  try { g.letterSpacing = '0px'; } catch (e) {}
-  g.font = '600 60px Inter, Arial, sans-serif'; g.fillStyle = '#3a3f47';
-  g.fillText('П А Р У С Н А Я   Ш К О Л А', 0, 128);
-  g.restore();
-  // номер
-  g.save(); g.translate(U(0.44), V(0.36)); g.rotate(tilt);
-  g.fillStyle = '#1f2a44'; g.font = 'bold 200px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('211777', 0, 0); g.restore();
-  // эмблема класса — маленькая, у передней шкаторины
-  g.save(); g.translate(U(0.16), V(0.78)); g.strokeStyle = '#c0282e'; g.lineWidth = 5; g.lineCap = 'round';
+  // эмблема класса — маленькая красная
+  g.save(); g.translate(U(0.3), V(0.6)); g.strokeStyle = '#c0282e'; g.lineWidth = 5; g.lineCap = 'round';
   for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12, r0 = 10 + (i % 2) * 14, r1 = 42 + (i % 3) * 14; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); g.stroke(); }
   g.restore();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  return tex;
+}
+
+// Корпус: u — вдоль (0 корма, 1 нос), v — по шпангоуту (0 левый планширь, 0.5 киль, 1 правый планширь).
+// Надпись «СИЛА >>> ВЕТРА» на скулах у носа с обоих бортов
+function makeHullTexture() {
+  const W = 2048, H = 1024;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f7f8fa'; g.fillRect(0, 0, W, H);
+  const draw = (y, mirror) => {
+    g.save(); g.translate(0.80 * W, y); if (mirror) g.scale(-1, 1);
+    g.fillStyle = '#141414'; g.font = '600 44px Inter, Arial, sans-serif'; g.textBaseline = 'middle';
+    try { g.letterSpacing = '4px'; } catch (e) {}
+    g.textAlign = 'right'; g.fillText('СИЛА', -70, 0);
+    g.textAlign = 'left'; g.fillText('ВЕТРА', 70, 0);
+    chevrons(g, -42, 0, 30, '#141414', 30);
+    g.restore();
+  };
+  draw(0.065 * H, false);   // правый борт (v≈0.935)
+  draw(0.935 * H, true);    // левый борт (v≈0.065) — зеркально, чтобы читалось снаружи
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
   return tex;
@@ -247,7 +263,7 @@ export function createBoat() {
   const heelG = new THREE.Group();
   root.add(heelG);
 
-  const matHull = new THREE.MeshPhysicalMaterial({ color: '#f7f8fa', roughness: 0.22, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+  const matHull = new THREE.MeshPhysicalMaterial({ color: '#ffffff', map: makeHullTexture(), roughness: 0.22, clearcoat: 0.8, clearcoatRoughness: 0.15 });
   const matDeck = new THREE.MeshStandardMaterial({ vertexColors: true, map: makeNonSkidTexture(), roughness: 0.85 });
   const matAlu = new THREE.MeshStandardMaterial({ color: '#b9bec6', metalness: 0.9, roughness: 0.3 });
   const matAluDark = new THREE.MeshStandardMaterial({ color: '#5b6068', metalness: 0.85, roughness: 0.35 });

@@ -19,12 +19,12 @@ export function createMinimap(canvas) {
   return function draw(state, out, ctl, show) {
     ctx.clearRect(0, 0, W, H);
     // фон
-    ctx.fillStyle = '#0f2744'; ctx.beginPath(); ctx.arc(cx, cy, R + 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#121212'; ctx.beginPath(); ctx.arc(cx, cy, R + 10, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     // мёртвая зона
     if (show.noGo) {
       const a0 = (ctl.windFrom - 42 - 90) * DEG, a1 = (ctl.windFrom + 42 - 90) * DEG;
-      ctx.fillStyle = 'rgba(239,68,68,.22)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,59,48,.25)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
     }
     // риски и буквы
     ctx.font = '600 12px Inter, Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -37,8 +37,8 @@ export function createMinimap(canvas) {
     // истинный ветер: стрелка от края к центру
     if (show.trueWind) {
       const [vx, vy] = bearingVec(ctl.windFrom);
-      arrow(cx + vx * (R - 2), cy + vy * (R - 2), cx + vx * 62, cy + vy * 62, '#3b82f6', 4, 12);
-      ctx.fillStyle = '#93c5fd'; ctx.font = '600 11px Inter, Arial';
+      arrow(cx + vx * (R - 2), cy + vy * (R - 2), cx + vx * 62, cy + vy * 62, '#0047ff', 4, 12);
+      ctx.fillStyle = '#8db0ff'; ctx.font = '600 11px Inter, Arial';
       ctx.fillText(`${Math.round(ctl.windSpeed)} уз`, cx + vx * (R - 2) - vy * 22, cy + vy * (R - 2) + vx * 22);
     }
     // вымпельный ветер: стрелка к лодке
@@ -46,17 +46,17 @@ export function createMinimap(canvas) {
       const L = Math.hypot(out.Ax, out.Az) || 0.001;
       const ux = out.Ax / L, uz = out.Az / L; // «куда»
       const len = Math.min(R - 10, 6.5 * out.AWS);
-      arrow(cx - ux * len, cy - uz * len, cx - ux * 48, cy - uz * 48, '#22d3ee', 3, 10);
+      arrow(cx - ux * len, cy - uz * len, cx - ux * 48, cy - uz * 48, '#8db0ff', 3, 10);
     }
     // скорость лодки
     if (show.vel) {
       const L = Math.hypot(out.Vx, out.Vz);
-      if (L > 0.05) { const len = Math.min(R - 10, 22 * L); arrow(cx, cy, cx + out.Vx / L * len, cy + out.Vz / L * len, '#22c55e', 3, 10); }
+      if (L > 0.05) { const len = Math.min(R - 10, 22 * L); arrow(cx, cy, cx + out.Vx / L * len, cy + out.Vz / L * len, '#ffffff', 3, 10); }
     }
     // сила на парусе
     if (show.force) {
       const L = Math.hypot(out.forceWorldX, out.forceWorldZ);
-      if (L > 5) { const len = Math.min(R - 10, L * 0.14); arrow(cx, cy, cx + out.forceWorldX / L * len, cy + out.forceWorldZ / L * len, '#f97316', 3, 10); }
+      if (L > 5) { const len = Math.min(R - 10, L * 0.14); arrow(cx, cy, cx + out.forceWorldX / L * len, cy + out.forceWorldZ / L * len, '#ff5700', 3, 10); }
     }
     // лодка
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(state.heading * DEG);
@@ -70,7 +70,7 @@ export function createMinimap(canvas) {
     ctx.bezierCurveTo(-0.72 * S, -0.3 * S, -0.55 * S, -1.4 * S, 0, -2.13 * S);
     ctx.closePath(); ctx.fill(); ctx.stroke();
     // кокпит
-    ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.roundRect(-0.45 * S, -0.5 * S, 0.9 * S, 1.5 * S, 5); ctx.fill();
+    ctx.fillStyle = '#8a8f96'; ctx.beginPath(); ctx.roundRect(-0.45 * S, -0.5 * S, 0.9 * S, 1.5 * S, 5); ctx.fill();
     // мачта
     const mx = 0, my = -1.12 * S;
     // гик и парус (boom>0 — по правому борту = +x на холсте)
@@ -80,13 +80,13 @@ export function createMinimap(canvas) {
     // пузо паруса
     const side = state.side, belly = out.luffing ? 0.1 : 0.18 + 0.25 * Math.min(1, out.aoa / 15);
     const nx = Math.cos(b) * -side, ny = -Math.sin(b) * -side; // нормаль под ветер
-    ctx.strokeStyle = out.luffing ? '#fca5a5' : '#f8fafc'; ctx.lineWidth = 2.5;
+    ctx.strokeStyle = out.luffing ? '#ff8a80' : '#f8fafc'; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(mx, my);
     ctx.quadraticCurveTo((mx + bx) / 2 + nx * belly * 2 * S, (my + by) / 2 + ny * belly * 2 * S, bx, by); ctx.stroke();
     ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI * 2); ctx.fill();
     // руль (+ = перо вправо, лодка направо)
     const r = ctl.rudder * DEG;
-    ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 2.1 * S); ctx.lineTo(Math.sin(r) * 0.55 * S, 2.1 * S + Math.cos(r) * 0.55 * S); ctx.stroke();
+    ctx.strokeStyle = '#ff5700'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 2.1 * S); ctx.lineTo(Math.sin(r) * 0.55 * S, 2.1 * S + Math.cos(r) * 0.55 * S); ctx.stroke();
     // румпель — в противоположную сторону
     ctx.strokeStyle = '#b45309'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 2.1 * S); ctx.lineTo(-Math.sin(r) * 0.9 * S, 2.1 * S - Math.cos(r) * 0.9 * S); ctx.stroke();
     ctx.restore();
