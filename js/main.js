@@ -291,7 +291,7 @@ function startLesson(i) {
   ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
   tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
   tb.tag.textContent = `УРОК ${i + 1}/${LESSONS.length}`; tb.title.textContent = L.title; tb.goal.textContent = L.goal; tb.time.textContent = ''; tb.note.textContent = ''; tb.fill.style.width = '0%';
-  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
+  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading; showGoal(9000);
 }
 function startRace() {
   lessons.stop(ctl);
@@ -302,13 +302,16 @@ function startRace() {
   tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
   tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Два буя'; tb.goal.textContent = 'Обогни оранжевый наветренный буй (110 м против ветра) и вернись к синему. Таймер пошёл после отсчёта.';
   tb.note.textContent = ''; tb.fill.style.width = '0%'; tb.time.textContent = '';
-  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
+  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading; showGoal(6000);
   toast('3', true, 900);
 }
 function exitTraining() {
   lessons.stop(ctl); course.stop(); mode = 'free';
   tb.bar.hidden = true; renderLessonList();
 }
+let goalTimer = 0;
+function showGoal(ms = 7000) { tb.bar.classList.add('show-goal'); clearTimeout(goalTimer); if (ms) goalTimer = setTimeout(() => tb.bar.classList.remove('show-goal'), ms); }
+$('trainbar').querySelector('.tb-main').addEventListener('click', () => { if (tb.bar.classList.contains('show-goal')) { clearTimeout(goalTimer); tb.bar.classList.remove('show-goal'); } else showGoal(0); });
 tb.exit.addEventListener('click', exitTraining);
 tb.retry.addEventListener('click', () => { if (mode === 'race') startRace(); else if (mode === 'lesson') startLesson(lessons.run.index); });
 tb.next.addEventListener('click', () => {
@@ -457,7 +460,18 @@ function updateUI(out, dt) {
 const clock = new THREE.Clock();
 let t = 0;
 let labelK = 1;
+let lastOffsetY = -1;
 function layoutOverlays(w) {
+  // лодка — в центре свободной области между шапкой и сенсорным пультом
+  const h = canvas.clientHeight;
+  if (w < 900 || w / h < 0.9) {
+    const top = $('topbar').getBoundingClientRect().bottom;
+    const touch = $('touch'); const tr = touch.getBoundingClientRect();
+    const bottom = (getComputedStyle(touch).display !== 'none' && tr.height > 0) ? tr.top : h;
+    const centerY = (top + bottom) / 2;
+    const offY = Math.round(THREE.MathUtils.clamp(h / 2 - centerY, -h * 0.2, h * 0.3));
+    if (offY !== lastOffsetY) { lastOffsetY = offY; camera.setViewOffset(w, h, 0, offY, w, h); camera.updateProjectionMatrix(); }
+  } else if (lastOffsetY !== 0) { lastOffsetY = 0; camera.clearViewOffset(); camera.updateProjectionMatrix(); }
   const k = THREE.MathUtils.clamp(w / 1100, 0.5, 1);
   if (Math.abs(k - labelK) > 0.01) {
     labelK = k; setLabelScale(compass, k);

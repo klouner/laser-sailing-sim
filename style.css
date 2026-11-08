@@ -219,6 +219,17 @@ details[open] summary::before{transform:rotate(90deg)}
   .hud-cap{display:none}
   #hud.min{padding:5px 8px}
   #hud.min .hud-cap{font-size:9px}
+  /* в уроке/гонке освобождаем экран: без логотипа и подсказки, цель сворачивается, чип рекордов скрыт */
+  #topbar:has(#trainbar:not([hidden])) .brand{display:none}
+  #topbar:has(#trainbar:not([hidden])) .status{padding:4px 8px 4px 4px}
+  #topbar:has(#trainbar:not([hidden])) .hint{display:none}
+  #topbar:has(#trainbar:not([hidden])) .speedo{min-width:64px;padding:3px 7px}
+  #topbar:has(#trainbar:not([hidden])) .speedo-main b{font-size:20px}
+  #topbar:has(#trainbar:not([hidden])) .speedo-sub{display:none}
+  .trainbar:not(.show-goal) .tb-goal{display:none}
+  .trainbar .tb-main{cursor:pointer}
+  #app:has(#trainbar:not([hidden])) #lb{display:none}
+  #app:has(#trainbar.done) #lb{display:flex}
 }
 @media (max-width:900px) and (max-height:700px){
   #hud{display:none}

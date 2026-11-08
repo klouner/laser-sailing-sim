@@ -1,29 +1,49 @@
-// Таблица лидеров: локально (localStorage) или через общий сервер (LEADERBOARD_URL)
+// Таблица лидеров: localStorage по умолчанию; общий вариант — свой сервер (server/) либо публичный JSON-блоб (jsonblob.com)
 import { LEADERBOARD_URL } from './config.js';
 
 const KEY = 'laser3d.leaderboard', NAME_KEY = 'laser3d.name';
-const sortTrim = (list) => list.filter(e => e && typeof e.time === 'number' && e.time > 20).sort((a, b) => a.time - b.time).slice(0, 10);
+const sortTrim = (list, n = 10) => (Array.isArray(list) ? list : []).filter(e => e && typeof e.time === 'number' && e.time > 20 && e.time < 3600).sort((a, b) => a.time - b.time).slice(0, n);
+const isBlob = /jsonblob\.com\/api\/jsonBlob\//.test(LEADERBOARD_URL);
+export const isShared = !!LEADERBOARD_URL;
+
+async function blobGet() {
+  const r = await fetch(LEADERBOARD_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  if (!r.ok) throw new Error('blob get ' + r.status);
+  return sortTrim(await r.json(), 50);
+}
+async function blobPut(list) {
+  const r = await fetch(LEADERBOARD_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(list) });
+  if (!r.ok) throw new Error('blob put ' + r.status);
+  return sortTrim(list);
+}
+function localGet() { try { return sortTrim(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (e) { return []; } }
+function localAdd(entry) {
+  let list = []; try { list = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
+  list.push(entry); list = sortTrim(list);
+  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+  return list;
+}
 
 export async function loadTop() {
   if (LEADERBOARD_URL) {
-    try { const r = await fetch(LEADERBOARD_URL + '/top', { cache: 'no-store' }); if (r.ok) return sortTrim(await r.json()); } catch (e) { /* падаем на локальную */ }
+    try {
+      if (isBlob) return (await blobGet()).slice(0, 10);
+      const r = await fetch(LEADERBOARD_URL + '/top', { cache: 'no-store' }); if (r.ok) return sortTrim(await r.json());
+    } catch (e) { /* падаем на локальную */ }
   }
-  try { return sortTrim(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (e) { return []; }
+  return localGet();
 }
 export function isRecord(top, time) { return top.length < 10 || time < top[top.length - 1].time; }
 export async function submit(name, time) {
   const entry = { name: String(name).slice(0, 18) || 'Без имени', time: Math.round(time * 10) / 10, date: new Date().toISOString().slice(0, 10) };
   if (LEADERBOARD_URL) {
     try {
+      if (isBlob) { const cur = await blobGet(); cur.push(entry); return await blobPut(sortTrim(cur, 50)); }
       const r = await fetch(LEADERBOARD_URL + '/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry) });
       if (r.ok) return sortTrim(await r.json());
     } catch (e) { /* локально */ }
   }
-  let list = []; try { list = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
-  list.push(entry); list = sortTrim(list);
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
-  return list;
+  return localAdd(entry);
 }
 export function rememberName(n) { try { localStorage.setItem(NAME_KEY, n); } catch (e) {} }
 export function savedName() { try { return localStorage.getItem(NAME_KEY) || ''; } catch (e) { return ''; } }
-export const isShared = !!LEADERBOARD_URL;
