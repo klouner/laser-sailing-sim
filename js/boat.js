@@ -147,77 +147,132 @@ function makeNonSkidTexture() {
   return t;
 }
 
-// Парус: u — от мачты (0) к задней шкаторине (1), v — от гика (0) к фаловому углу (1).
-// Дизайн по мотивам парусов «Силы ветра»: белое полотно, чёрная верхняя панель, номер в кружке, мелкие >>>
+// ---------- рангоут и форма паруса ----------
+export const RIG = { MAST_H: 5.10, RAKE: 0.14, BOOM_H: 0.58, BOOM_L: 2.74, CLEW: 2.60 };
+const SAIL = (() => {
+  const tack = new THREE.Vector3(0.0, RIG.BOOM_H + 0.03, 0);
+  const head = new THREE.Vector3(-RIG.RAKE * (RIG.MAST_H - 0.05) / RIG.MAST_H, RIG.MAST_H - 0.05, 0);
+  const clew = new THREE.Vector3(-RIG.CLEW, RIG.BOOM_H + 0.03, 0);
+  const leechDir = head.clone().sub(clew).normalize();
+  const roachOut = new THREE.Vector3(-leechDir.y, leechDir.x, 0).normalize(); if (roachOut.x > 0) roachOut.negate();
+  // плоская развёртка: u — от мачты к задней шкаторине, v — от гика к фаловому углу → (x, y) в метрах
+  const flat = (u, v) => {
+    const lx = tack.x + (head.x - tack.x) * v, ly = tack.y + (head.y - tack.y) * v;
+    const roach = 0.24 * Math.sin(Math.PI * Math.pow(v, 0.9)) * (1 - 0.2 * v);
+    const ex = clew.x + (head.x - clew.x) * v + roachOut.x * roach;
+    const ey = clew.y + (head.y - clew.y) * v + roachOut.y * roach;
+    return { x: lx + (ex - lx) * u, y: ly + (ey - ly) * u, chord: Math.hypot(ex - lx, ey - ly) };
+  };
+  let xmin = 1e9, xmax = -1e9, ymin = 1e9, ymax = -1e9;
+  for (let i = 0; i <= 40; i++) for (let j = 0; j <= 40; j++) { const p = flat(i / 40, j / 40); xmin = Math.min(xmin, p.x); xmax = Math.max(xmax, p.x); ymin = Math.min(ymin, p.y); ymax = Math.max(ymax, p.y); }
+  xmin -= 0.03; xmax += 0.03; ymin -= 0.03; ymax += 0.03;
+  return { tack, head, clew, leechDir, roachOut, flat, xmin, xmax, ymin, ymax, w: xmax - xmin, h: ymax - ymin };
+})();
+
 function chevrons(g, x, y, h, color, gap) {
   g.save(); g.translate(x, y); g.strokeStyle = color; g.lineWidth = h * 0.3; g.lineJoin = 'miter'; g.lineCap = 'butt'; g.miterLimit = 8;
   for (let i = 0; i < 3; i++) { const x0 = i * gap; g.beginPath(); g.moveTo(x0, -h / 2); g.lineTo(x0 + h * 0.55, 0); g.lineTo(x0, h / 2); g.stroke(); }
   g.restore();
 }
+
+// Текстура паруса рисуется в реальных метрах (без искажений): холст = габарит плоского паруса.
+// Дизайн по мотивам парусов «Силы ветра»: белое полотно, чёрная верхняя панель, номер в кружке, мелкие >>>
 function makeSailTexture() {
-  const S = 2048;
-  const c = document.createElement('canvas'); c.width = S; c.height = S;
+  const H = 2048, K = H / SAIL.h, W = Math.round(SAIL.w * K);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
-  const U = (u) => u * S, V = (v) => (1 - v) * S;
-  g.fillStyle = '#f4f3ee'; g.fillRect(0, 0, S, S);
-  for (let i = 0; i < 30; i++) {
-    g.fillStyle = `rgba(0,0,0,${0.008 + Math.random() * 0.012})`;
-    g.beginPath(); g.ellipse(Math.random() * S, Math.random() * S, 200 + Math.random() * 400, 60 + Math.random() * 120, Math.random() * 3, 0, Math.PI * 2); g.fill();
+  const X = (x) => (x - SAIL.xmin) * K, Yc = (y) => (SAIL.ymax - y) * K; // метры → пиксели
+  const P = (x, y) => [X(x), Yc(y)];
+  g.fillStyle = '#f3f2ed'; g.fillRect(0, 0, W, H);
+  // лёгкая фактура ткани
+  const img = g.getImageData(0, 0, W, H); const d = img.data;
+  for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 10; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(img, 0, 0);
+  // точки на шкаторинах
+  const luff = (v) => SAIL.flat(0, v), leech = (v) => SAIL.flat(1, v);
+  // швы полотнищ: перпендикулярно задней шкаторине, шаг ~0.5 м
+  const perp = new THREE.Vector2(-SAIL.leechDir.y, SAIL.leechDir.x); if (perp.x > 0) perp.negate(); // в сторону мачты
+  g.strokeStyle = 'rgba(70,70,70,0.22)'; g.lineWidth = 2.5;
+  for (let s = 0.5; s < 5.2; s += 0.5) {
+    const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s);
+    g.beginPath(); g.moveTo(...P(L.x, L.y)); g.lineTo(...P(L.x + perp.x * 4, L.y + perp.y * 4)); g.stroke();
   }
-  // швы полотнищ, перпендикулярно задней шкаторине
-  g.strokeStyle = 'rgba(90,90,90,0.28)'; g.lineWidth = 3;
-  for (let v = 0.1; v < 0.75; v += 0.1) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0), V(v + 0.085)); g.stroke(); }
-  // чёрная верхняя панель
+  // чёрная верхняя панель: граница перпендикулярна задней шкаторине, выше — всё чёрное
+  const cut = SAIL.clew.clone().addScaledVector(SAIL.leechDir, 3.65);
+  const A = { x: cut.x - perp.x * 1.0, y: cut.y - perp.y * 1.0 };   // за задней шкаториной
+  const B = { x: cut.x + perp.x * 4.0, y: cut.y + perp.y * 4.0 };   // за мачтой
   g.fillStyle = '#141414';
-  g.beginPath(); g.moveTo(U(0), V(0.80)); g.lineTo(U(1), V(0.715)); g.lineTo(U(1), V(1)); g.lineTo(U(0), V(1)); g.closePath(); g.fill();
-  // номер в кружке — у задней шкаторины панели
-  g.save(); g.translate(U(0.80), V(0.80)); g.rotate(-0.085);
-  g.strokeStyle = '#ffffff'; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, 92, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = '#ffffff'; g.font = '500 118px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('5', 0, 6); g.restore();
-  // >>> у передней шкаторины панели
-  g.save(); g.translate(U(0.07), V(0.86)); g.rotate(-0.085); chevrons(g, 0, 0, 56, '#ffffff', 48); g.restore();
-  // латы
-  g.strokeStyle = 'rgba(60,60,60,0.5)'; g.lineWidth = 9;
-  for (const v of [0.24, 0.44, 0.63]) { g.beginPath(); g.moveTo(U(1), V(v)); g.lineTo(U(0.6), V(v + 0.03)); g.stroke(); }
-  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.moveTo(U(1), V(0.82)); g.lineTo(U(0.6), V(0.85)); g.stroke();
-  // усиления углов — светло-серые
+  g.beginPath(); g.moveTo(...P(A.x, A.y)); g.lineTo(...P(B.x, B.y)); g.lineTo(...P(B.x, B.y + 8)); g.lineTo(...P(A.x, A.y + 8)); g.closePath(); g.fill();
+  // номер в кружке у задней шкаторины панели (истинный круг)
+  const num = SAIL.clew.clone().addScaledVector(SAIL.leechDir, 4.1).addScaledVector(new THREE.Vector3(perp.x, perp.y, 0), 0.34);
+  g.save(); g.translate(...P(num.x, num.y));
+  g.strokeStyle = '#ffffff'; g.lineWidth = 0.014 * K; g.beginPath(); g.arc(0, 0, 0.17 * K, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#ffffff'; g.font = `500 ${Math.round(0.23 * K)}px Inter, Arial, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('5', 0, 0.012 * K); g.restore();
+  // >>> у мачты в панели
+  const ch = luff(0.86);
+  g.save(); g.translate(...P(ch.x - 0.08, ch.y)); g.rotate(-0.08); chevrons(g, 0, 0, 0.11 * K, '#ffffff', 0.095 * K); g.restore();
+  // латы: перпендикулярно задней шкаторине
+  const batten = (s, len, color, wpx) => { const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s); g.strokeStyle = color; g.lineWidth = wpx; g.beginPath(); g.moveTo(...P(L.x, L.y)); g.lineTo(...P(L.x + perp.x * len, L.y + perp.y * len)); g.stroke(); };
+  batten(1.2, 0.95, 'rgba(60,60,60,0.5)', 0.02 * K); batten(2.25, 0.85, 'rgba(60,60,60,0.5)', 0.02 * K); batten(3.2, 0.7, 'rgba(60,60,60,0.5)', 0.02 * K); batten(4.3, 0.5, 'rgba(255,255,255,0.4)', 0.018 * K);
+  // усиления углов
   g.fillStyle = 'rgba(120,120,120,0.35)';
-  g.beginPath(); g.moveTo(U(0), V(0)); g.lineTo(U(0.16), V(0)); g.lineTo(U(0), V(0.13)); g.closePath(); g.fill();
-  g.beginPath(); g.moveTo(U(1), V(0)); g.lineTo(U(0.85), V(0)); g.lineTo(U(1), V(0.11)); g.closePath(); g.fill();
-  // окно
-  g.fillStyle = 'rgba(170,200,225,0.75)'; g.strokeStyle = 'rgba(70,90,110,0.5)'; g.lineWidth = 4;
-  g.beginPath(); g.moveTo(U(0.5), V(0.05)); g.lineTo(U(0.78), V(0.05)); g.lineTo(U(0.78), V(0.145)); g.lineTo(U(0.5), V(0.16)); g.closePath(); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(...P(SAIL.tack.x, SAIL.tack.y)); g.lineTo(...P(SAIL.tack.x - 0.45, SAIL.tack.y)); g.lineTo(...P(SAIL.tack.x, SAIL.tack.y + 0.5)); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(...P(SAIL.clew.x, SAIL.clew.y)); g.lineTo(...P(SAIL.clew.x + 0.45, SAIL.clew.y)); g.lineTo(...P(SAIL.clew.x + 0.1, SAIL.clew.y + 0.5)); g.closePath(); g.fill();
+  // окно: прямоугольник 0.75 × 0.45 м над гиком
+  const wx = SAIL.clew.x + 0.55, wy = SAIL.tack.y + 0.22;
+  g.fillStyle = 'rgba(170,200,225,0.75)'; g.strokeStyle = 'rgba(70,90,110,0.5)'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(...P(wx, wy)); g.lineTo(...P(wx + 0.75, wy)); g.lineTo(...P(wx + 0.75, wy + 0.45)); g.lineTo(...P(wx, wy + 0.45)); g.closePath(); g.fill(); g.stroke();
   // эмблема класса — маленькая красная
-  g.save(); g.translate(U(0.3), V(0.6)); g.strokeStyle = '#c0282e'; g.lineWidth = 5; g.lineCap = 'round';
-  for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12, r0 = 10 + (i % 2) * 14, r1 = 42 + (i % 3) * 14; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); g.stroke(); }
+  const em = SAIL.flat(0.3, 0.55);
+  g.save(); g.translate(...P(em.x, em.y)); g.strokeStyle = '#c0282e'; g.lineWidth = 0.008 * K; g.lineCap = 'round';
+  for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12, r0 = (0.02 + (i % 2) * 0.025) * K, r1 = (0.07 + (i % 3) * 0.02) * K; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); g.stroke(); }
   g.restore();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
   return tex;
 }
 
-// Корпус: u — вдоль (0 корма, 1 нос), v — по шпангоуту (0 левый планширь, 0.5 киль, 1 правый планширь).
-// Надпись «СИЛА >>> ВЕТРА» на скулах у носа с обоих бортов
-function makeHullTexture() {
-  const W = 2048, H = 1024;
+// Накладка с надписью «СИЛА >>> ВЕТРА» на скуле у носа: тонкий лоскут, повторяющий форму борта
+function makeBrandDecalTexture() {
+  const W = 1900, H = 440;
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
-  g.fillStyle = '#f7f8fa'; g.fillRect(0, 0, W, H);
-  const draw = (y, mirror) => {
-    g.save(); g.translate(0.80 * W, y); if (mirror) g.scale(-1, 1);
-    g.fillStyle = '#141414'; g.font = '600 44px Inter, Arial, sans-serif'; g.textBaseline = 'middle';
-    try { g.letterSpacing = '4px'; } catch (e) {}
-    g.textAlign = 'right'; g.fillText('СИЛА', -70, 0);
-    g.textAlign = 'left'; g.fillText('ВЕТРА', 70, 0);
-    chevrons(g, -42, 0, 30, '#141414', 30);
-    g.restore();
-  };
-  draw(0.065 * H, false);   // правый борт (v≈0.935)
-  draw(0.935 * H, true);    // левый борт (v≈0.065) — зеркально, чтобы читалось снаружи
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#141414'; g.font = '600 190px Inter, Arial, sans-serif'; g.textBaseline = 'middle';
+  try { g.letterSpacing = '12px'; } catch (e) {}
+  g.textAlign = 'right'; g.fillText('СИЛА', W / 2 - 230, H / 2);
+  g.textAlign = 'left'; g.fillText('ВЕТРА', W / 2 + 230, H / 2);
+  chevrons(g, W / 2 - 150, H / 2, 130, '#141414', 110);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
   return tex;
+}
+function makeHullDecal(side, tex) {
+  const xa = 0.85, xb = 1.80, NX = 24, NY = 8;
+  const pos = [], uv = [], idx = [];
+  for (let i = 0; i <= NX; i++) {
+    const x = xa + (xb - xa) * i / NX;
+    const st = deckHeightAt(x);
+    const yTop = st.sheer - 0.07, yBot = Math.max(st.keel + 0.03, st.sheer - 0.29);
+    for (let j = 0; j <= NY; j++) {
+      const y = yBot + (yTop - yBot) * j / NY;
+      const ratio = THREE.MathUtils.clamp((st.sheer - y) / Math.max(1e-3, st.sheer - st.keel), 1e-4, 1);
+      const t = (2 / Math.PI) * Math.acos(Math.pow(ratio, 1 / st.flat));
+      const p = sectionPoint(st, side * t);
+      pos.push(p.x, p.y, p.z + side * 0.006);
+      uv.push(i / NX, j / NY);
+    }
+  }
+  const row = NY + 1;
+  for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) { const a = i * row + j, b2 = a + 1, c2 = a + row, d2 = c2 + 1; idx.push(a, b2, c2, b2, d2, c2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const t2 = side < 0 ? (() => { const t = tex.clone(); t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.offset.x = 1; return t; })() : tex;
+  const mat = new THREE.MeshStandardMaterial({ map: t2, transparent: true, roughness: 0.3, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false });
+  return new THREE.Mesh(g, mat);
 }
 
 // ---------- вспомогательные ----------
@@ -271,7 +326,7 @@ export function createBoat() {
   const heelG = new THREE.Group();
   root.add(heelG);
 
-  const matHull = new THREE.MeshPhysicalMaterial({ color: '#ffffff', map: makeHullTexture(), roughness: 0.22, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+  const matHull = new THREE.MeshPhysicalMaterial({ color: '#f7f8fa', roughness: 0.22, clearcoat: 0.8, clearcoatRoughness: 0.15 });
   const matDeck = new THREE.MeshStandardMaterial({ vertexColors: true, map: makeNonSkidTexture(), roughness: 0.85 });
   const matAlu = new THREE.MeshStandardMaterial({ color: '#b9bec6', metalness: 0.9, roughness: 0.3 });
   const matAluDark = new THREE.MeshStandardMaterial({ color: '#5b6068', metalness: 0.85, roughness: 0.35 });
@@ -286,6 +341,8 @@ export function createBoat() {
   hull.castShadow = true; hull.receiveShadow = true; heelG.add(hull);
   const deck = new THREE.Mesh(buildDeckGeometry(), matDeck);
   deck.castShadow = true; deck.receiveShadow = true; heelG.add(deck);
+  const brandTex = makeBrandDecalTexture();
+  heelG.add(makeHullDecal(1, brandTex)); heelG.add(makeHullDecal(-1, brandTex));
   const rail = new THREE.Mesh(new THREE.TubeGeometry(sheerCurve(), 300, 0.02, 10, true), matRubber);
   rail.castShadow = true; heelG.add(rail);
 
@@ -341,7 +398,7 @@ export function createBoat() {
   const rig = new THREE.Group();
   const mastBase = new THREE.Vector3(HULL.mastX, deckAt(HULL.mastX), 0);
   rig.position.copy(mastBase); heelG.add(rig);
-  const MAST_H = 5.10, RAKE = 0.14, BOOM_H = 0.58, BOOM_L = 2.74, CLEW = 2.60;
+  const { MAST_H, RAKE, BOOM_H, BOOM_L, CLEW } = RIG;
   const mastTilt = Math.atan2(RAKE, MAST_H);
   const mastAt = (h) => new THREE.Vector3(-RAKE * h / MAST_H, h, 0);
   // нижнее колено (открытое, алюминий)
@@ -381,7 +438,7 @@ export function createBoat() {
   const sailPos = new Float32Array((NU + 1) * (NV + 1) * 3);
   const sailUV = new Float32Array((NU + 1) * (NV + 1) * 2);
   const sailIdx = [];
-  for (let i = 0; i <= NU; i++) for (let j = 0; j <= NV; j++) { const k = i * (NV + 1) + j; sailUV[k * 2] = i / NU; sailUV[k * 2 + 1] = j / NV; }
+  for (let i = 0; i <= NU; i++) for (let j = 0; j <= NV; j++) { const k = i * (NV + 1) + j; const p = SAIL.flat(i / NU, j / NV); sailUV[k * 2] = (p.x - SAIL.xmin) / SAIL.w; sailUV[k * 2 + 1] = (p.y - SAIL.ymin) / SAIL.h; }
   for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) { const a = i * (NV + 1) + j, b = a + 1, c = a + NV + 1, d = c + 1; sailIdx.push(a, b, c, b, d, c); }
   sailGeo.setAttribute('position', new THREE.BufferAttribute(sailPos, 3));
   sailGeo.setAttribute('uv', new THREE.BufferAttribute(sailUV, 2));
@@ -395,11 +452,6 @@ export function createBoat() {
   // ликтрос задней шкаторины
   const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006);
 
-  const tack = new THREE.Vector3(0.0, BOOM_H + 0.03, 0);
-  const head = mastAt(MAST_H - 0.05);
-  const clew = new THREE.Vector3(-CLEW, BOOM_H + 0.03, 0);
-  const leechDir = head.clone().sub(clew).normalize();
-  const roachOut = new THREE.Vector3(-leechDir.y, leechDir.x, 0).normalize(); if (roachOut.x > 0) roachOut.negate();
 
   // флюгарка
   const windex = new THREE.Group(); windex.position.copy(mastAt(MAST_H + 0.04));
@@ -481,12 +533,8 @@ export function createBoat() {
       const u = i / NU;
       for (let j = 0; j <= NV; j++) {
         const v = j / NV;
-        const lx = tack.x + (head.x - tack.x) * v, ly = tack.y + (head.y - tack.y) * v;
-        const roach = 0.24 * Math.sin(Math.PI * Math.pow(v, 0.9)) * (1 - 0.2 * v);
-        const ex = clew.x + (head.x - clew.x) * v + roachOut.x * roach;
-        const ey = clew.y + (head.y - clew.y) * v + roachOut.y * roach;
-        const x = lx + (ex - lx) * u, y = ly + (ey - ly) * u;
-        const chord = Math.hypot(ex - lx, ey - ly);
+        const fp = SAIL.flat(u, v);
+        const x = fp.x, y = fp.y, chord = fp.chord;
         const shape = Math.sin(Math.PI * Math.pow(u, 0.82));
         let z = -side * camberFrac * chord * shape * (1 - 0.35 * v);
         z += -side * Math.sin(twist * v) * chord * u * 0.35 * power;
