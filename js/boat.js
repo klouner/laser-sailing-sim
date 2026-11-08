@@ -177,7 +177,7 @@ function chevrons(g, x, y, h, color, gap) {
 
 // Текстура паруса рисуется в реальных метрах (без искажений): холст = габарит плоского паруса.
 // Дизайн по мотивам парусов «Силы ветра»: белое полотно, чёрная верхняя панель, номер в кружке, мелкие >>>
-function makeSailTexture() {
+function makeSailTexture(mirrorGlyphs = false) {
   const H = 2048, K = H / SAIL.h, W = Math.round(SAIL.w * K);
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
@@ -191,7 +191,7 @@ function makeSailTexture() {
   // точки на шкаторинах
   const luff = (v) => SAIL.flat(0, v), leech = (v) => SAIL.flat(1, v);
   // швы полотнищ: перпендикулярно задней шкаторине, шаг ~0.5 м
-  const perp = new THREE.Vector2(-SAIL.leechDir.y, SAIL.leechDir.x); if (perp.x > 0) perp.negate(); // в сторону мачты
+  const perp = new THREE.Vector2(-SAIL.leechDir.y, SAIL.leechDir.x); if (perp.x < 0) perp.negate(); // внутрь паруса, к мачте
   g.strokeStyle = 'rgba(70,70,70,0.22)'; g.lineWidth = 2.5;
   for (let s = 0.5; s < 5.2; s += 0.5) {
     const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s);
@@ -205,13 +205,13 @@ function makeSailTexture() {
   g.beginPath(); g.moveTo(...P(A.x, A.y)); g.lineTo(...P(B.x, B.y)); g.lineTo(...P(B.x, B.y + 8)); g.lineTo(...P(A.x, A.y + 8)); g.closePath(); g.fill();
   // номер в кружке у задней шкаторины панели (истинный круг)
   const num = SAIL.clew.clone().addScaledVector(SAIL.leechDir, 4.1).addScaledVector(new THREE.Vector3(perp.x, perp.y, 0), 0.34);
-  g.save(); g.translate(...P(num.x, num.y));
+  g.save(); g.translate(...P(num.x, num.y)); if (mirrorGlyphs) g.scale(-1, 1);
   g.strokeStyle = '#ffffff'; g.lineWidth = 0.014 * K; g.beginPath(); g.arc(0, 0, 0.17 * K, 0, Math.PI * 2); g.stroke();
   g.fillStyle = '#ffffff'; g.font = `500 ${Math.round(0.23 * K)}px Inter, Arial, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText('5', 0, 0.012 * K); g.restore();
   // >>> у мачты в панели
   const ch = luff(0.86);
-  g.save(); g.translate(...P(ch.x - 0.08, ch.y)); g.rotate(-0.08); chevrons(g, 0, 0, 0.11 * K, '#ffffff', 0.095 * K); g.restore();
+  g.save(); g.translate(...P(ch.x - 0.08, ch.y)); g.rotate(-0.08); if (mirrorGlyphs) { g.translate(0.19 * K, 0); g.scale(-1, 1); } chevrons(g, 0, 0, 0.11 * K, '#ffffff', 0.095 * K); g.restore();
   // латы: перпендикулярно задней шкаторине
   const batten = (s, len, color, wpx) => { const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s); g.strokeStyle = color; g.lineWidth = wpx; g.beginPath(); g.moveTo(...P(L.x, L.y)); g.lineTo(...P(L.x + perp.x * len, L.y + perp.y * len)); g.stroke(); };
   batten(1.2, 0.95, 'rgba(60,60,60,0.5)', 0.02 * K); batten(2.25, 0.85, 'rgba(60,60,60,0.5)', 0.02 * K); batten(3.2, 0.7, 'rgba(60,60,60,0.5)', 0.02 * K); batten(4.3, 0.5, 'rgba(255,255,255,0.4)', 0.018 * K);
@@ -443,11 +443,12 @@ export function createBoat() {
   sailGeo.setAttribute('position', new THREE.BufferAttribute(sailPos, 3));
   sailGeo.setAttribute('uv', new THREE.BufferAttribute(sailUV, 2));
   sailGeo.setIndex(sailIdx);
-  const sailTex = makeSailTexture();
-  const sailTexBack = sailTex.clone(); sailTexBack.wrapS = THREE.RepeatWrapping; sailTexBack.repeat.x = -1; sailTexBack.offset.x = 1;
-  // лицевые грани сетки смотрят в сторону, где u растёт влево — им зеркальная текстура, обратным — прямая
-  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.FrontSide, roughness: 0.92 }));
-  const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.BackSide, roughness: 0.92 }));
+  // две текстуры: одинаковая геометрия рисунка, но глифы (цифра, шевроны) отражены — чтобы читались с обоих бортов
+  const sailTex = makeSailTexture(false);
+  const sailTexBack = makeSailTexture(true);
+  // лицевым граням — прямые глифы, обратным — отражённые
+  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92 }));
+  const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 }));
   sail.castShadow = true; sail.receiveShadow = true; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
   const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006);
