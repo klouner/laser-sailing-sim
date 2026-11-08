@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createBoat, HULL } from './boat.js';
 import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
-import { createState, defaultControls, step, norm180, compassName, optimalSheet, KN } from './physics.js';
+import { createState, defaultControls, step, norm180, norm360, compassName, optimalSheet, KN } from './physics.js';
 import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
 import { LESSONS, createLessonRunner } from './lessons.js';
@@ -112,6 +112,7 @@ ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autop
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
 ui.autoSheet.addEventListener('change', () => { setAutoSheet(ui.autoSheet.checked); });
 ui.lockHeading.addEventListener('change', () => { ctl.lockHeading = ui.lockHeading.checked; });
+$('gusts').addEventListener('change', (e) => { if (raceLocked() || lessons.run.status === 'running') { e.target.checked = false; toast('В уроках и гонке ветер ровный'); return; } ctl.gusts = e.target.checked; });
 
 $('btn-pause').addEventListener('click', togglePause);
 $('btn-reset').addEventListener('click', reset);
@@ -275,8 +276,11 @@ function renderLessonList() {
     box.appendChild(b);
   });
 }
+let gustsBefore = null;
 function resetForTraining() {
   const s = createState(); Object.assign(state, s);
+  if (gustsBefore === null) gustsBefore = ctl.gusts;
+  ctl.gusts = false; $('gusts').checked = false;
   ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
   ctl.lockHeading = false; ui.lockHeading.checked = false; setAutoSheet(false);
   if (ctl.paused) togglePause();
@@ -307,6 +311,7 @@ function startRace() {
 }
 function exitTraining() {
   lessons.stop(ctl); course.stop(); mode = 'free';
+  if (gustsBefore !== null) { ctl.gusts = gustsBefore; $('gusts').checked = ctl.gusts; gustsBefore = null; }
   tb.bar.hidden = true; renderLessonList();
 }
 let goalTimer = 0;
@@ -347,7 +352,10 @@ function askName(time) {
   okB.addEventListener('click', onOk); skipB.addEventListener('click', onSkip);
   input.onkeydown = (e) => { if (e.key === 'Enter') onOk(); };
 }
+let wasCapsized = false;
 function updateTraining(out, dt, t) {
+  if (out.capsized && !wasCapsized) { toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
+  wasCapsized = !!out.capsized;
   if (mode === 'race') {
     const r = course.race;
     if (r.phase === 'countdown') {
@@ -425,9 +433,9 @@ setCamera('chase');
 let uiAcc = 0;
 function updateUI(out, dt) {
   uiAcc += dt; if (uiAcc < 0.1) return; uiAcc = 0;
-  $('v-windFrom').textContent = `${Math.round(ctl.windFrom)}°`;
+  $('v-windFrom').textContent = `${Math.round(ctl.windFrom)}°` + (ctl.gusts && Math.abs(out.windFrom - ctl.windFrom) > 2 ? ` (сейчас ${Math.round(norm360(out.windFrom))}°)` : '');
   $('v-windName').textContent = compassName(ctl.windFrom);
-  $('v-windSpeed').textContent = `${fmt(ctl.windSpeed, 1)} уз`;
+  $('v-windSpeed').textContent = `${fmt(ctl.windSpeed, 1)} уз` + (ctl.gusts ? ` (сейчас ${fmt(out.windKn, 1)})` : '');
   $('v-heading').textContent = `${Math.round(state.heading)}°`;
   $('v-twa').textContent = `${Math.round(Math.abs(out.TWA))}° к ветру`;
   if (document.activeElement !== ui.heading) ui.heading.value = Math.round(state.heading);
@@ -437,7 +445,7 @@ function updateUI(out, dt) {
   $('v-rudder').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо →' : '← влево'}`;
   $('t-rudder-val').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо' : 'влево'}`;
   $('t-sheet-val').textContent = `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' авто' : '');
-  $('t-windChip').textContent = `Ветер ${Math.round(ctl.windFrom)}° ${compassName(ctl.windFrom)} · ${fmt(ctl.windSpeed, 0)} уз`;
+  $('t-windChip').textContent = `Ветер ${Math.round(norm360(out.windFrom))}° ${compassName(out.windFrom)} · ${fmt(out.windKn, 0)} уз`;
   if (document.activeElement !== ui.rudder) ui.rudder.value = r;
 
   $('pos-name').textContent = out.pos.name;
@@ -517,7 +525,7 @@ function frame() {
   // сцена
   boat.update(state, out, ctl, dt, t);
   water.userData.update(t, Math.round(state.x), Math.round(state.z), ctl.windFrom * DEG);
-  compass.userData.update(state.x, state.z, ctl.windFrom);
+  compass.userData.update(state.x, state.z, out.windFrom);
   compass.userData.setNoGo(show.noGo);
   streaks.visible = show.streaks;
   if (show.streaks) streaks.userData.update(ctl.paused ? 0 : dt, state.x, state.z, out.Wx, out.Wz, ctl.windSpeed);
@@ -533,7 +541,7 @@ function frame() {
   const WS = 0.5; // м на 1 м/с ветра
   const endAt = (vx, vz, R) => { const L = Math.hypot(vx, vz) || 1; return new THREE.Vector3(center.x - vx / L * R, center.y, center.z - vz / L * R); };
   arrows.trueWind.setVisible(show.trueWind, show.labels);
-  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(out.Wx, out.Wz, 1.0), `Ветер ${fmt(ctl.windSpeed, 0)} уз`, dt);
+  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(out.Wx, out.Wz, 1.0), `Ветер ${fmt(out.windKn, 0)} уз`, dt);
   arrows.appWind.setVisible(show.appWind, show.labels);
   const appFrom = new THREE.Vector3(center.x - out.Ax * WS, 2.4, center.z - out.Az * WS);
   const appTo = endAt(out.Ax, out.Az, 0.6); appTo.y = 2.4; appFrom.y = 2.4;

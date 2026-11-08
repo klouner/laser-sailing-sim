@@ -10,7 +10,7 @@
 <meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 <script type="importmap">
 {
   "imports": {
@@ -73,6 +73,7 @@
         <input type="range" id="windSpeed" min="2" max="25" step="0.5" value="10">
       </label>
       <div class="checks">
+        <label><input type="checkbox" id="gusts" checked> Порывы и заходы ветра <small>(±20%, ±9°)</small></label>
         <label><input type="checkbox" id="compassWind"> 📱 Ветер по компасу телефона <small id="compassState"></small></label>
       </div>
     </section>
@@ -217,6 +218,6 @@
 
   <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
 </div>
-<script type="module" src="js/main.js?v=20"></script>
+<script type="module" src="js/main.js?v=21"></script>
 </body>
 </html>

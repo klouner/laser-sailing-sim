@@ -452,6 +452,10 @@ export function createBoat() {
   sail.castShadow = true; sail.receiveShadow = true; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
   const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006);
+  // колдунчики: пары ленточек у передней шкаторины на двух высотах (правый борт зелёный, левый красный)
+  const ttG = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.9 }), ttR = new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.9 });
+  const telltales = [];
+  for (const v of [0.3, 0.6]) for (const sgn of [1, -1]) telltales.push({ u: 0.22, v, sgn, draw: rope(rig, sgn > 0 ? ttG : ttR, 0.006), phase: Math.random() * 10 });
 
 
   // флюгарка
@@ -520,15 +524,19 @@ export function createBoat() {
     hip: new THREE.Vector3(), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
     elbowA: new THREE.Vector3(), handA: new THREE.Vector3(), elbowB: new THREE.Vector3(), handB: new THREE.Vector3(), tmp: new THREE.Vector3(),
   };
-  const sailorState = { hike: 0, side: 1 };
 
-  function updateSail(out, dt) {
+  function updateSail(out, dt, state) {
     const side = out.side, aoa = out.aoa;
-    const luff = out.luffing ? 1 : Math.max(0, 1 - aoa / 6);
+    // полное заполаскивание (шкот перетравлен) — полощет весь парус, сильнее у задней шкаторины;
+    // малый угол атаки — «пузырь» у передней шкаторины (парус заполаскивает спереди)
+    const full = out.luffing ? 1 : 0;
+    const partial = out.luffing ? 0 : Math.max(0, 1 - aoa / 7);
     flutterPhase += dt * (6 + out.AWS * 1.2);
     const power = Math.min(1, out.q / 60);
     const camberFrac = 0.025 + 0.085 * Math.min(1, aoa / 14) * (0.4 + 0.6 * power);
-    const twist = 10 * DEG * (0.3 + 0.7 * Math.min(1, out.AWS / 6));
+    // твист: подобранный шкот (и оттяжка) закрывают верх; потравленный — верх открывается
+    const boomMag = Math.min(90, Math.abs(state.boom));
+    const twist = (6 + 16 * boomMag / 90) * DEG * (0.3 + 0.7 * Math.min(1, out.AWS / 6));
     const pa = sailPos;
     for (let i = 0; i <= NU; i++) {
       const u = i / NU;
@@ -539,9 +547,12 @@ export function createBoat() {
         const shape = Math.sin(Math.PI * Math.pow(u, 0.82));
         let z = -side * camberFrac * chord * shape * (1 - 0.35 * v);
         z += -side * Math.sin(twist * v) * chord * u * 0.35 * power;
-        if (luff > 0) {
-          const fl = luff * 0.11 * Math.sin(flutterPhase * 1.3 + u * 7 + v * 3) * Math.pow(u, 0.7) * (0.3 + 0.7 * (1 - v * 0.5));
-          z = z * (1 - 0.8 * luff) + fl * Math.min(1, out.AWS / 3);
+        if (full > 0) {
+          const fl = 0.12 * Math.sin(flutterPhase * 1.3 + u * 7 + v * 3) * (0.25 + 0.75 * u) * (0.4 + 0.6 * (1 - v * 0.5));
+          z = z * 0.2 + fl * Math.min(1, out.AWS / 3);
+        } else if (partial > 0) {
+          const bubble = partial * 0.07 * Math.sin(flutterPhase * 1.7 + v * 4) * Math.exp(-u * 5) * (1 - 0.3 * v);
+          z += side * bubble * Math.min(1, out.AWS / 3);
         }
         // у мачты парус огибает карман
         z += -side * 0.03 * Math.exp(-u * 12);
@@ -554,20 +565,69 @@ export function createBoat() {
     const leech = [];
     for (let j = 0; j <= NV; j += 4) { const k = (NU * (NV + 1) + j) * 3; leech.push(new THREE.Vector3(pa[k], pa[k + 1], pa[k + 2])); }
     leechRope(leech);
+    // колдунчики: наветренный дёргается вверх при малом угле атаки, подветренный обвисает при срыве
+    for (const t of telltales) {
+      const i = Math.round(t.u * NU), j = Math.round(t.v * NV), k = (i * (NV + 1) + j) * 3;
+      const base = new THREE.Vector3(pa[k], pa[k + 1], pa[k + 2] + t.sgn * 0.025);
+      const windward = t.sgn === side;              // ветер приходит со стороны side (+z = правый борт)
+      const stream = windward ? (aoa >= 8 && !out.luffing ? 1 : 0) : (aoa <= 26 && !out.luffing ? 1 : 0);
+      const wig = Math.sin(flutterPhase * 2.2 + t.phase);
+      const len = 0.28, dir = new THREE.Vector3(-1, 0, 0); // вдоль хорды назад
+      const lift = windward ? (1 - stream) * (0.6 + 0.4 * wig) : 0;          // наветренный поднимается
+      const droop = !windward ? (1 - stream) * (0.5 + 0.3 * wig) : 0;       // подветренный обвисает
+      const p1 = base.clone().addScaledVector(dir, len * 0.5).add(new THREE.Vector3(0, len * 0.5 * (lift - droop) + 0.02 * wig * stream, t.sgn * 0.02 * stream * wig));
+      const p2 = base.clone().addScaledVector(dir, len * (0.3 + 0.7 * stream)).add(new THREE.Vector3(0, len * (lift * 0.9 - droop * 0.9) + 0.03 * wig * stream, t.sgn * 0.04 * stream * Math.sin(flutterPhase * 2.2 + t.phase + 1)));
+      t.draw([base, p1, p2]);
+    }
   }
 
-  function updateSailor(state, dt) {
+  // ---------- техника матроса ----------
+  // Поза зависит от курса, силы ветра, крена и манёвра:
+  //  • лавировка в слабый ветер — сидит ближе к центру (в штиль даже под ветром, чтобы накренить лодку и наполнить парус)
+  //  • лавировка в свежий ветер — откренивает: таз на планшире, ноги прямые под ремнём, корпус почти горизонтально
+  //  • галфвинд/бакштаг — сидит на наветренном борту, при глиссировании смещается в корму
+  //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
+  //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
+  const SS = { side: 1, x: -0.35, z: 0.45, theta: 0.4, crouch: 0 };
+  function updateSailor(state, dt, out) {
     const side = state.side;
-    sailorState.hike += (Math.min(1, Math.abs(state.heel) / 16) - sailorState.hike) * Math.min(1, dt * 3);
-    const h = sailorState.hike;
-    const dy = deckAt(-0.35);
-    // таз на кромке борта; при откренивании сдвигается наружу
-    P.hip.set(-0.35, dy + 0.06, side * (0.44 + 0.2 * h));
-    const theta = 0.35 + 0.9 * h; // наклон корпуса наружу
-    const dir = P.tmp.set(-0.06, Math.cos(theta), side * Math.sin(theta)).normalize();
+    const k = Math.min(1, dt * 3);
+    SS.side += (side - SS.side) * Math.min(1, dt * 2.4);
+    const cross = 1 - Math.min(1, Math.abs(SS.side));            // 1 — в середине перехода
+    const sgn = Math.sign(SS.side) || side;
+    const twa = out ? out.twaAbs : 90, hike = state.hike, spd = state.vf;
+    const light = Math.max(0, 1 - Math.abs(out ? out.Fs : 100) / 60); // штилевой режим
+    const planing = Math.min(1, Math.max(0, (spd - 2.4) / 1.5));
+    // целевые параметры позы
+    let tx, tz, ttheta;
+    if (twa < 95) {            // против ветра и галфвинд
+      tx = -0.15 - 0.25 * hike;
+      tz = 0.46 + 0.22 * hike - 0.55 * light;                      // в штиль — к центру и даже под ветер
+      ttheta = 0.35 + 1.1 * hike - 0.25 * light;
+    } else if (twa < 150) {    // бакштаг
+      tx = -0.35 - 0.45 * planing;
+      tz = 0.42 + 0.2 * hike;
+      ttheta = 0.3 + 0.9 * hike;
+    } else {                   // фордевинд
+      tx = -0.25 - 0.3 * planing;
+      tz = 0.22;
+      ttheta = 0.12;
+    }
+    SS.x += (tx - SS.x) * k; SS.z += (tz - SS.z) * k; SS.theta += (ttheta - SS.theta) * k;
+    SS.crouch += (cross - SS.crouch) * Math.min(1, dt * 6);
+    const h = Math.min(1, Math.max(0, (SS.theta - 0.35) / 1.1));  // степень откренивания 0..1
+    const dy = deckAt(SS.x);
+    const zAbs = SS.z * Math.abs(SS.side) + 0.05 * (1 - Math.abs(SS.side)); // при переходе — через центр
+    const lateral = sgn * zAbs;
+    const crouch = SS.crouch;
+    // таз
+    P.hip.set(SS.x, dy + 0.06 - 0.12 * crouch, lateral);
+    const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
+    const lean = 0.25 * crouch;                                     // при переходе наклон вперёд
+    const dir = P.tmp.set(-0.06 + lean, Math.cos(theta), sgn * Math.sin(theta)).normalize();
     const chestC = P.hip.clone().addScaledVector(dir, 0.34);
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.5);
-    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, 0.01, -side * 0.04));
+    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, -0.06 * crouch, -sgn * 0.04));
     const q = new THREE.Quaternion().setFromUnitVectors(Y, dir);
     pelvis.position.copy(P.hip); pelvis.quaternion.copy(q);
     abdomen.position.copy(P.hip).addScaledVector(dir, 0.15); abdomen.quaternion.copy(q);
@@ -575,27 +635,37 @@ export function createBoat() {
     vestBand.position.copy(P.hip).addScaledVector(dir, 0.27); vestBand.quaternion.copy(q); vestBand.rotateX(Math.PI / 2);
     neck.position.copy(P.shoulder).addScaledVector(dir, 0.06); neck.quaternion.copy(q);
     headM.position.copy(P.headP);
-    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -side * 0.15);
-    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2, 0);
+    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -sgn * 0.15 * h);
+    // взгляд: вперёд, при откренивании — вверх на парус
+    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2 + sgn * 0.3 * h, 0);
     glasses.position.copy(P.headP).add(new THREE.Vector3(0.09, 0.01, 0));
     // плечи
-    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, side * 0.01)); // заднее плечо
-    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, side * 0.01));  // переднее плечо
+    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, sgn * 0.01));
+    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, sgn * 0.01));
     shoulderL.position.copy(shA); shoulderR.position.copy(shB);
-    // ноги: колени у кромки кокпита, стопы под ремнём; при откренивании ноги выпрямляются
+    // ноги: при откренивании прямые, колени у кромки борта, стопы под ремнём; сидя — согнуты
     for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.11], [thighR, shinR, kneeR, footR, -0.11]]) {
-      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -side * 0.06));
-      P.knee.set(-0.35 + off * 0.9, dy + 0.16 - 0.1 * h, side * (0.14 - 0.1 * h));
-      P.foot.set(-0.3 + off * 0.9, floorY + 0.05, -side * 0.03);
+      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -sgn * 0.06));
+      const kneeZ = sgn * (0.30 - 0.22 * h) * (1 - crouch) + sgn * 0.12 * crouch;
+      const kneeY = dy + (0.16 - 0.12 * h) * (1 - crouch) + 0.02 * crouch;
+      P.knee.set(SS.x + off * 0.9 + 0.04 * h, kneeY, kneeZ + off * 0.3);
+      P.foot.set(SS.x + 0.05 + off * 0.9, floorY + 0.05, -sgn * 0.03 * (1 - crouch) + off * 0.5);
       thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, P.foot);
       knee.position.copy(P.knee);
-      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -side * 0.02)); foot.rotation.set(0, side * 0.35, 0);
+      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -sgn * 0.02)); foot.rotation.set(0, sgn * 0.35, 0);
     }
-    // руки: задняя — румпель-удлинитель, передняя — шкот
-    P.handA.set(-0.95, dy + 0.28 + 0.12 * h, side * (0.28 + 0.22 * h));
-    P.handB.set(0.1, dy + 0.4 - 0.05 * h, side * (0.16 + 0.18 * h));
-    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, side * 0.14));
-    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, side * 0.12));
+    // руки: задняя — румпель-удлинитель (поперёк корпуса), передняя — шкот
+    const run = twa >= 150;
+    P.handA.set(SS.x - 0.6, dy + 0.28 + 0.12 * h - 0.1 * crouch, sgn * (0.3 + 0.25 * h) * (1 - crouch));
+    if (run) {
+      // на фордевинде шкот держат ближе к гику: рука на участке шкота от блока к гику
+      const bm = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
+      P.handB.copy(blockTop).lerp(bm, 0.35);
+    } else {
+      P.handB.set(SS.x + 0.4, dy + 0.38 - 0.1 * h - 0.1 * crouch, sgn * (0.16 + 0.22 * h) * (1 - crouch));
+    }
+    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, sgn * 0.14));
+    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, sgn * 0.12));
     upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
     upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
     // удлинитель румпеля — в заднюю руку
@@ -604,10 +674,10 @@ export function createBoat() {
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
     const extLen = THREE.MathUtils.clamp(d.length(), 0.5, 1.3);
     extension.scale.y = extLen / 1.1; extension.position.x = extLen / 2; extGrip.position.x = extLen - 0.1;
-    // шкот от блока в переднюю руку: на попутных курсах матрос держит длинную слабину
+    // шкот от блока в переднюю руку
     const handPt = P.handB.clone().add(new THREE.Vector3(0, -0.03, 0));
     const midY = (blockTop.y + handPt.y) / 2;
-    const wantSag = 0.03 + 0.1 * sheetState.ease + 0.12 * sheetState.slack;
+    const wantSag = run ? 0.02 : 0.03 + 0.1 * sheetState.ease + 0.12 * sheetState.slack;
     const sag = Math.min(wantSag, midY - (floorY + 0.05));
     handSheet([blockTop, handPt], [Math.max(0, sag)]);
   }
@@ -623,7 +693,7 @@ export function createBoat() {
 
     rig.rotation.y = -state.boom * DEG;
     windex.rotation.y = -out.AWA * DEG - rig.rotation.y;
-    updateSail(out, dt);
+    updateSail(out, dt, state);
 
     // гика-шкот: блок на погоне → блок на ноке гика → обратно на погон (тали 2:1) → вдоль гика к среднему блоку → блок в кокпите
     const rot = rig.rotation.y;
@@ -642,10 +712,13 @@ export function createBoat() {
       [0.01 + 0.14 * sl, 0.01 + 0.14 * sl, 0.02 + 0.16 * sl, 0.02 + 0.22 * sl, 0.0]
     );
 
-    rudderPivot.rotation.y = ctl.rudder * DEG;
+    rudderPivot.rotation.y = state.rudder * DEG;
+    board.position.y = trunkTop + 0.28 - 0.725 + 0.725 + (1 - state.board) * 0.6; boardTop.position.y = trunkTop + 0.29 + (1 - state.board) * 0.6; handle.position.y = trunkTop + 0.34 + (1 - state.board) * 0.6;
     sheetState.ease += (out.sheet / 90 - sheetState.ease) * Math.min(1, dt * 3);
-    if (sailor.visible) updateSailor(state, dt);
+    sailor.visible = sailorEnabled && !out.capsized;
+    if (sailor.visible) updateSailor(state, dt, out);
   }
 
-  return { root, heelG, rig, update, setSailor: (v) => { sailor.visible = v; handSheet([blockTop, blockTop.clone().add(new THREE.Vector3(0, 0.001, 0))]); }, MAST_H, BOOM_H };
+  let sailorEnabled = true;
+  return { root, heelG, rig, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; if (!v) handSheet([blockTop, blockTop.clone().add(new THREE.Vector3(0, 0.001, 0))]); }, MAST_H, BOOM_H };
 }

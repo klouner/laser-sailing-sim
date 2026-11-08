@@ -23,7 +23,8 @@ export function createMinimap(canvas) {
     ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     // мёртвая зона
     if (show.noGo) {
-      const a0 = (ctl.windFrom - 42 - 90) * DEG, a1 = (ctl.windFrom + 42 - 90) * DEG;
+      const wf = out.windFrom !== undefined ? out.windFrom : ctl.windFrom;
+      const a0 = (wf - 42 - 90) * DEG, a1 = (wf + 42 - 90) * DEG;
       ctx.fillStyle = 'rgba(255,59,48,.25)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
     }
     // риски и буквы
@@ -36,10 +37,10 @@ export function createMinimap(canvas) {
     }
     // истинный ветер: стрелка от края к центру
     if (show.trueWind) {
-      const [vx, vy] = bearingVec(ctl.windFrom);
+      const [vx, vy] = bearingVec(out.windFrom !== undefined ? out.windFrom : ctl.windFrom);
       arrow(cx + vx * (R - 2), cy + vy * (R - 2), cx + vx * 62, cy + vy * 62, '#0047ff', 4, 12);
       ctx.fillStyle = '#8db0ff'; ctx.font = '600 11px Inter, Arial';
-      ctx.fillText(`${Math.round(ctl.windSpeed)} уз`, cx + vx * (R - 2) - vy * 22, cy + vy * (R - 2) + vx * 22);
+      ctx.fillText(`${Math.round(out.windKn !== undefined ? out.windKn : ctl.windSpeed)} уз`, cx + vx * (R - 2) - vy * 22, cy + vy * (R - 2) + vx * 22);
     }
     // вымпельный ветер: стрелка к лодке
     if (show.appWind) {
@@ -96,7 +97,7 @@ export function createMinimap(canvas) {
     ctx.quadraticCurveTo((mx + bx) / 2 + nx * belly * 2 * S, (my + by) / 2 + ny * belly * 2 * S, bx, by); ctx.stroke();
     ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI * 2); ctx.fill();
     // руль (+ = перо вправо, лодка направо)
-    const r = ctl.rudder * DEG;
+    const r = (state.rudder !== undefined ? state.rudder : ctl.rudder) * DEG;
     ctx.strokeStyle = '#ff5700'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 2.1 * S); ctx.lineTo(Math.sin(r) * 0.55 * S, 2.1 * S + Math.cos(r) * 0.55 * S); ctx.stroke();
     // румпель — в противоположную сторону
     ctx.strokeStyle = '#b45309'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 2.1 * S); ctx.lineTo(-Math.sin(r) * 0.9 * S, 2.1 * S - Math.cos(r) * 0.9 * S); ctx.stroke();
