@@ -35,6 +35,58 @@ body{position:fixed;inset:0;width:100%}
 .hint.good{color:#ffffff}.hint.warn{color:#ffb38a}.hint.bad{color:#ff8a80}
 .icon-btn{display:none;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer}
 
+/* ---------- урок / гонка ---------- */
+.trainbar{flex-basis:100%;display:flex;gap:12px;align-items:flex-start;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;max-width:min(700px, calc(100% - 360px))}
+.trainbar[hidden]{display:none}
+.tb-main{flex:1;min-width:0}
+.tb-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tb-head b{font-size:14px;font-weight:600}
+.tb-time{margin-left:auto;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tb-goal{font-size:12.5px;color:#d6d6d6;margin-top:5px;line-height:1.35}
+.tb-prog{height:4px;background:rgba(255,255,255,.14);border-radius:2px;margin-top:8px;overflow:hidden}
+.tb-prog div{height:100%;width:0;background:var(--blue);border-radius:2px;transition:width .2s}
+.trainbar.done .tb-prog div{background:#fff}
+.trainbar.fail .tb-prog div{background:var(--orange)}
+.tb-note{font-size:12px;color:var(--muted);margin-top:5px;min-height:14px}
+.trainbar.done .tb-note{color:#fff}
+.trainbar.fail .tb-note{color:#ffb38a}
+.tb-btns{display:flex;flex-direction:column;gap:6px}
+.tb-btns .btn{min-width:44px;padding:8px 10px;flex:0}
+.lesson-list{display:flex;flex-direction:column;gap:6px}
+.lesson{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 11px;cursor:pointer;text-align:left;color:var(--text);font-family:inherit;font-size:13px;width:100%}
+.lesson:hover{background:rgba(255,255,255,.08)}
+.lesson .n{width:22px;height:22px;border-radius:50%;border:1px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex:0 0 auto}
+.lesson.passed .n{background:#fff;color:#111}
+.lesson.active{border-color:var(--blue)}
+.race-help{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.4}
+
+/* ---------- таблица лидеров ---------- */
+.lb{position:absolute;left:16px;bottom:304px;z-index:4;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.lb-chip{background:var(--panel);border:1px solid var(--border);color:#fff;border-radius:999px;padding:7px 12px;font:500 12px Inter,sans-serif;cursor:pointer;letter-spacing:.02em}
+.lb-chip:hover{border-color:#fff}
+.lb-list{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;min-width:230px}
+.lb-list[hidden]{display:none}
+.lb-title{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}
+.lb-title small{text-transform:none;letter-spacing:0;color:#666}
+.lb-list ol{margin:0;padding-left:22px;font-size:13px;line-height:1.6}
+.lb-list li span{color:var(--muted);float:right;font-variant-numeric:tabular-nums;margin-left:12px}
+.lb-list li.me{color:#8fb0ff}
+
+/* ---------- тост и модалка ---------- */
+.toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;background:rgba(18,18,18,.92);border:1px solid #fff;color:#fff;border-radius:999px;padding:12px 22px;font:600 16px Inter,sans-serif;letter-spacing:.02em;pointer-events:none;animation:toastin .25s ease-out}
+.toast.big{font-size:44px;padding:18px 36px;border-radius:24px}
+.toast[hidden]{display:none}
+@keyframes toastin{from{opacity:0;transform:translate(-50%,-50%) scale(.9)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.modal{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px}
+.modal[hidden]{display:none}
+.modal-box{background:#121212;border:1px solid var(--border);border-radius:var(--radius);padding:22px;max-width:360px;width:100%;text-align:center}
+.modal-tag{display:inline-block;border:1px solid #fff;border-radius:999px;padding:3px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+.modal-time{font-size:44px;font-weight:700;margin:12px 0 4px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.modal-text{color:var(--muted);font-size:13px;margin-bottom:14px}
+.modal input{width:100%;background:#1c1c1c;border:1px solid var(--border);border-radius:var(--r-sm);color:#fff;padding:12px;font:500 16px Inter,sans-serif;text-align:center;outline:none}
+.modal input:focus{border-color:var(--blue)}
+.modal .btns{margin-top:12px}
+
 /* ---------- панель ---------- */
 #panel{position:absolute;right:16px;top:86px;bottom:16px;width:340px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;z-index:4;scrollbar-width:thin;padding-right:2px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
@@ -151,6 +203,18 @@ details[open] summary::before{transform:rotate(90deg)}
   #panel .card{background:rgba(255,255,255,.04)}
   #panel .foot{display:none}
   #hud{bottom:auto;top:120px;left:8px;padding:3px;border-radius:10px}
+  .trainbar{padding:7px 10px;gap:8px;border-radius:12px;max-width:none}
+  .tb-head b{font-size:12.5px}
+  .tb-time{font-size:17px}
+  .tb-goal{font-size:11px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tb-note{font-size:11px}
+  .tb-btns{flex-direction:row}
+  .tb-btns .btn{min-width:36px;padding:6px 8px;font-size:11px}
+  .lb{left:auto;right:8px;bottom:auto;top:120px;align-items:flex-end}
+  .lb-chip{padding:5px 9px;font-size:11px}
+  .lb-list{min-width:200px;font-size:12px}
+  .toast{font-size:14px;padding:10px 16px}
+  .toast.big{font-size:32px;padding:14px 26px}
   #minimap{width:108px;height:108px;border-radius:8px}
   .hud-cap{display:none}
   #hud.min{padding:5px 8px}

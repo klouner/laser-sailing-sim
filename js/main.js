@@ -4,6 +4,9 @@ import { createBoat, HULL } from './boat.js';
 import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
 import { createState, defaultControls, step, norm180, compassName, optimalSheet, KN } from './physics.js';
 import { createMinimap } from './hud.js';
+import { createCourse, fmtTime } from './course.js';
+import { LESSONS, createLessonRunner } from './lessons.js';
+import { loadTop, isRecord, submit, rememberName, savedName, isShared } from './leaderboard.js';
 
 const DEG = Math.PI / 180;
 const $ = (id) => document.getElementById(id);
@@ -74,6 +77,9 @@ arrows.appWind.labelAt = 0.4; arrows.appWind.labelLift = 0.5;
 arrows.vel.labelAt = 1.0; arrows.vel.labelLift = 0.45;
 arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.45;
 
+const course = createCourse(scene);
+const lessons = createLessonRunner();
+
 // ---------- состояние ----------
 const state = createState();
 const ctl = defaultControls();
@@ -95,11 +101,12 @@ const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
 function setRudder(v) { ctl.rudder = THREE.MathUtils.clamp(v, -35, 35); ui.rudder.value = Math.round(ctl.rudder); autopilot = null; }
 function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, 0, 90); ui.sheet.value = Math.round(ctl.sheet); ctl.autoSheet = false; ui.autoSheet.checked = false; $('t-auto').classList.remove('active'); }
 function setWindFrom(v) { ctl.windFrom = ((v % 360) + 360) % 360; ui.windFrom.value = Math.round(ctl.windFrom); }
-function setAutoSheet(v) { ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
+function setAutoSheet(v) { if (v && (raceLocked() || lessons.run.status === 'running')) { toast('Автошкот недоступен в уроках и гонке'); v = false; } ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
 
-ui.windFrom.addEventListener('input', () => { ctl.windFrom = +ui.windFrom.value; if (devCompass.on) setCompass(false); });
-ui.windSpeed.addEventListener('input', () => { ctl.windSpeed = +ui.windSpeed.value; });
-ui.heading.addEventListener('input', () => { state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; });
+const raceLocked = () => course.race.active && course.race.phase !== 'finished';
+ui.windFrom.addEventListener('input', () => { if (raceLocked()) { ui.windFrom.value = ctl.windFrom; return; } ctl.windFrom = +ui.windFrom.value; if (devCompass.on) setCompass(false); });
+ui.windSpeed.addEventListener('input', () => { if (raceLocked()) { ui.windSpeed.value = ctl.windSpeed; return; } ctl.windSpeed = +ui.windSpeed.value; });
+ui.heading.addEventListener('input', () => { if (raceLocked() || lessons.run.status === 'running') { ui.heading.value = Math.round(state.heading); return; } state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; });
 ui.sheet.addEventListener('input', () => { setSheet(+ui.sheet.value); });
 ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autopilot = null; });
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
@@ -109,6 +116,7 @@ ui.lockHeading.addEventListener('change', () => { ctl.lockHeading = ui.lockHeadi
 $('btn-pause').addEventListener('click', togglePause);
 $('btn-reset').addEventListener('click', reset);
 $('btn-tack').addEventListener('click', () => {
+  if (raceLocked() || lessons.run.status === 'running') { toast('В уроках и гонке поворот делаем рулём вручную'); return; }
   const twa = norm180(ctl.windFrom - state.heading);
   if (Math.abs(twa) > 95) { // на попутных курсах — поворот фордевинд
     autopilot = { target: ctl.windFrom + 180 + (twa > 0 ? 40 : -40) };
@@ -135,6 +143,7 @@ function onOrientation(e) {
   devCompass.heading = ((hd + so) % 360 + 360) % 360;
 }
 async function setCompass(on) {
+  if (on && raceLocked()) { toast('Во время гонки ветер фиксирован'); on = false; }
   if (on) {
     try {
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -247,6 +256,133 @@ function handleKeys(dt) {
   if (inS || outS) { ctl.autoSheet = false; ui.autoSheet.checked = false; ctl.sheet = THREE.MathUtils.clamp(ctl.sheet + (outS ? 1 : -1) * 40 * dt, 0, 90); ui.sheet.value = Math.round(ctl.sheet); }
 }
 
+// ---------- тренировка: уроки, гонка, рекорды ----------
+let toastTimer = 0;
+function toast(text, big = false, ms = 2200) {
+  const el = $('toast'); el.textContent = text; el.className = 'toast' + (big ? ' big' : ''); el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+const tb = { bar: $('trainbar'), tag: $('tb-tag'), title: $('tb-title'), time: $('tb-time'), goal: $('tb-goal'), fill: $('tb-fill'), note: $('tb-note'), next: $('tb-next'), retry: $('tb-retry'), exit: $('tb-exit') };
+let mode = 'free'; // free | lesson | race
+const passed = new Set(JSON.parse(localStorage.getItem('laser3d.passed') || '[]'));
+function savePassed() { try { localStorage.setItem('laser3d.passed', JSON.stringify([...passed])); } catch (e) {} }
+function renderLessonList() {
+  const box = $('lesson-list'); box.innerHTML = '';
+  LESSONS.forEach((L, i) => {
+    const b = document.createElement('button'); b.className = 'lesson' + (passed.has(L.id) ? ' passed' : '') + (mode === 'lesson' && lessons.run.index === i ? ' active' : '');
+    b.innerHTML = `<span class="n">${passed.has(L.id) ? '✓' : i + 1}</span><span>${L.title}</span>`;
+    b.addEventListener('click', () => { startLesson(i); $('panel').classList.remove('open'); });
+    box.appendChild(b);
+  });
+}
+function resetForTraining() {
+  const s = createState(); Object.assign(state, s);
+  ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
+  ctl.lockHeading = false; ui.lockHeading.checked = false; setAutoSheet(false);
+  if (ctl.paused) togglePause();
+}
+function startLesson(i) {
+  if (course.race.active) course.stop();
+  resetForTraining();
+  mode = 'lesson';
+  lessons.start(i, state, ctl);
+  const L = lessons.run.lesson;
+  course.showCourse(!!L.usesCourse);
+  ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
+  tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
+  tb.tag.textContent = `УРОК ${i + 1}/${LESSONS.length}`; tb.title.textContent = L.title; tb.goal.textContent = L.goal; tb.time.textContent = ''; tb.note.textContent = ''; tb.fill.style.width = '0%';
+  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
+}
+function startRace() {
+  lessons.stop(ctl);
+  resetForTraining();
+  mode = 'race';
+  course.start(state, ctl);
+  ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
+  tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
+  tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Два буя'; tb.goal.textContent = 'Обогни оранжевый наветренный буй (110 м против ветра) и вернись к синему. Таймер пошёл после отсчёта.';
+  tb.note.textContent = ''; tb.fill.style.width = '0%'; tb.time.textContent = '';
+  renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
+  toast('3', true, 900);
+}
+function exitTraining() {
+  lessons.stop(ctl); course.stop(); mode = 'free';
+  tb.bar.hidden = true; renderLessonList();
+}
+tb.exit.addEventListener('click', exitTraining);
+tb.retry.addEventListener('click', () => { if (mode === 'race') startRace(); else if (mode === 'lesson') startLesson(lessons.run.index); });
+tb.next.addEventListener('click', () => {
+  if (mode === 'lesson') { const i = lessons.run.index + 1; if (i < LESSONS.length) startLesson(i); else startRace(); }
+  else startRace();
+});
+$('btn-race').addEventListener('click', () => { startRace(); $('panel').classList.remove('open'); });
+$('btn-course').addEventListener('click', () => { course.showCourse(!course.group.visible); });
+$('t-train').addEventListener('click', () => { $('panel').classList.add('open'); $('card-train').scrollIntoView({ block: 'start' }); });
+renderLessonList();
+
+// таблица лидеров
+let top = [];
+function renderTop() {
+  $('lb-best').textContent = top.length ? `${fmtTime(top[0].time)} · ${top[0].name}` : 'Рекордов пока нет';
+  $('lb-scope').textContent = isShared ? '· общая' : '· на этом устройстве';
+  const ol = $('lb-ol'); ol.innerHTML = '';
+  const me = savedName();
+  top.forEach((e) => { const li = document.createElement('li'); li.innerHTML = `${e.name}<span>${fmtTime(e.time)}</span>`; if (me && e.name === me) li.classList.add('me'); ol.appendChild(li); });
+  if (!top.length) { const li = document.createElement('li'); li.textContent = 'Пройди гонку первым!'; li.style.listStyle = 'none'; li.style.marginLeft = '-22px'; ol.appendChild(li); }
+}
+$('lb-chip').addEventListener('click', () => { $('lb-list').hidden = !$('lb-list').hidden; });
+loadTop().then((t) => { top = t; renderTop(); });
+function askName(time) {
+  const modal = $('name-modal'), input = $('name-input');
+  $('modal-time').textContent = fmtTime(time); input.value = savedName(); modal.hidden = false; setTimeout(() => input.focus(), 50);
+  const done = async (save) => {
+    modal.hidden = true; okB.removeEventListener('click', onOk); skipB.removeEventListener('click', onSkip);
+    if (save) { const name = input.value.trim() || 'Без имени'; rememberName(name); top = await submit(name, time); renderTop(); $('lb-list').hidden = false; toast('Записано в топ-10'); }
+  };
+  const okB = $('name-ok'), skipB = $('name-skip');
+  const onOk = () => done(true), onSkip = () => done(false);
+  okB.addEventListener('click', onOk); skipB.addEventListener('click', onSkip);
+  input.onkeydown = (e) => { if (e.key === 'Enter') onOk(); };
+}
+function updateTraining(out, dt, t) {
+  if (mode === 'race') {
+    const r = course.race;
+    if (r.phase === 'countdown') {
+      ctl.paused = true;
+      const n = Math.ceil(r.countdown); tb.time.textContent = String(n);
+      if (n !== updateTraining.lastN) { updateTraining.lastN = n; if (n > 0) toast(String(n), true, 900); }
+    }
+    const ev = course.update(state, ctl, dt, t);
+    if (ev === 'go') { ctl.paused = false; toast('СТАРТ!', true, 1200); $('btn-pause').textContent = 'Пауза'; $('t-pause').textContent = '⏸'; }
+    if (ev === 'rounded') toast('Буй обогнут — теперь вниз, к синему', false, 2500);
+    if (r.phase === 'leg1' || r.phase === 'leg2') {
+      tb.time.textContent = fmtTime(r.t);
+      tb.note.textContent = `${r.phase === 'leg1' ? 'К оранжевому бую' : 'К синему бую'} · ${Math.round(r.dist)} м · пеленг ${Math.round(r.bearing)}°`;
+      const legLen = 110; const p = r.phase === 'leg1' ? 0.5 * (1 - Math.min(1, r.dist / legLen)) : 0.5 + 0.5 * (1 - Math.min(1, r.dist / legLen));
+      tb.fill.style.width = (p * 100).toFixed(1) + '%';
+    }
+    if (ev === 'finish') {
+      tb.bar.classList.add('done'); tb.fill.style.width = '100%'; tb.time.textContent = fmtTime(r.result);
+      const rec = isRecord(top, r.result);
+      tb.note.textContent = rec ? 'Финиш! Это результат уровня топ-10.' : `Финиш! До топ-10 не хватило ${fmtTime(r.result - top[top.length - 1].time)}.`;
+      tb.next.hidden = false; tb.next.textContent = 'Ещё раз';
+      toast('ФИНИШ ' + fmtTime(r.result), true, 2500);
+      if (rec) setTimeout(() => askName(r.result), 1500);
+    }
+  } else if (mode === 'lesson') {
+    const run = lessons.run;
+    const ev = lessons.update(out, state, ctl, dt, course);
+    if (run.status === 'running') { tb.fill.style.width = (run.progress * 100).toFixed(1) + '%'; tb.note.textContent = run.note; tb.time.textContent = fmtTime(run.el); }
+    if (ev === 'done') {
+      tb.bar.classList.add('done'); tb.fill.style.width = '100%'; tb.note.textContent = '✓ Урок пройден'; tb.next.hidden = false;
+      tb.next.textContent = run.index + 1 < LESSONS.length ? 'Дальше →' : 'К гонке →';
+      passed.add(run.lesson.id); savePassed(); renderLessonList(); toast('Урок пройден', true, 1600);
+    }
+    if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; }
+  }
+}
+window.__sim = { state, ctl, course, lessons, startRace, startLesson };
+
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
 const camTargetOffset = new THREE.Vector3(0, 0.9, 0);
@@ -328,8 +464,8 @@ function layoutOverlays(w) {
     for (const a of Object.values(arrows)) a.setLabelScale(k);
   }
   const hud = $('hud');
-  if (w < 900) { const r = $('topbar').getBoundingClientRect(); hud.style.top = Math.round(r.bottom + 8) + 'px'; }
-  else hud.style.top = '';
+  if (w < 900) { const r = $('topbar').getBoundingClientRect(); hud.style.top = Math.round(r.bottom + 8) + 'px'; $('lb').style.top = hud.style.top; }
+  else { hud.style.top = ''; $('lb').style.top = ''; }
 }
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -362,6 +498,7 @@ function frame() {
   let out;
   const sub = 3;
   for (let i = 0; i < sub; i++) out = step(state, ctl, dt / sub);
+  updateTraining(out, dt, t);
 
   // сцена
   boat.update(state, out, ctl, dt, t);
@@ -398,7 +535,7 @@ function frame() {
   updateTouch();
   updateCamera(dt);
   updateUI(out, dt);
-  drawMinimap(state, out, ctl, show);
+  drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.L, color: '#0047ff', active: course.race.phase === 'leg2' }] } : null);
   renderer.render(scene, camera);
 }
 

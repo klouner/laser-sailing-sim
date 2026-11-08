@@ -16,7 +16,7 @@ export function createMinimap(canvas) {
   }
   function bearingVec(b) { return [Math.sin(b * DEG), -Math.cos(b * DEG)]; } // на холсте: x вправо, y вниз; север вверх
 
-  return function draw(state, out, ctl, show) {
+  return function draw(state, out, ctl, show, extra) {
     ctx.clearRect(0, 0, W, H);
     // фон
     ctx.fillStyle = '#121212'; ctx.beginPath(); ctx.arc(cx, cy, R + 10, 0, Math.PI * 2); ctx.fill();
@@ -57,6 +57,17 @@ export function createMinimap(canvas) {
     if (show.force) {
       const L = Math.hypot(out.forceWorldX, out.forceWorldZ);
       if (L > 5) { const len = Math.min(R - 10, L * 0.14); arrow(cx, cy, cx + out.forceWorldX / L * len, cy + out.forceWorldZ / L * len, '#ff5700', 3, 10); }
+    }
+    // буи трассы (радар: 130 м = радиус)
+    if (extra && extra.marks) {
+      const k = (R - 14) / 130;
+      for (const mk of extra.marks) {
+        let dx = (mk.x - state.x) * k, dz = (mk.z - state.z) * k; const L = Math.hypot(dx, dz);
+        const clipped = L > R - 14; if (clipped) { dx *= (R - 14) / L; dz *= (R - 14) / L; }
+        ctx.fillStyle = mk.color; ctx.beginPath(); ctx.arc(cx + dx, cy + dz, mk.active ? 7 : 5, 0, Math.PI * 2); ctx.fill();
+        if (mk.active) { ctx.strokeStyle = mk.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx + dx, cy + dz, 11, 0, Math.PI * 2); ctx.stroke(); }
+        if (clipped) { ctx.fillStyle = '#fff'; ctx.font = '600 10px Inter, Arial'; ctx.textAlign = 'center'; ctx.fillText(Math.round(L / k) + ' м', cx + dx, cy + dz - 14); }
+      }
     }
     // лодка
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(state.heading * DEG);
