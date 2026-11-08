@@ -173,13 +173,31 @@ function makeSailTexture() {
   // окно
   g.fillStyle = 'rgba(170,200,225,0.75)'; g.strokeStyle = 'rgba(70,90,110,0.5)'; g.lineWidth = 4;
   g.beginPath(); g.moveTo(U(0.5), V(0.05)); g.lineTo(U(0.78), V(0.05)); g.lineTo(U(0.78), V(0.145)); g.lineTo(U(0.5), V(0.16)); g.closePath(); g.fill(); g.stroke();
+  // ---- брендинг «Сила ветра»: три шеврона >>> и надпись, наклон вдоль швов ----
+  const tilt = -0.085;
+  g.save(); g.translate(U(0.47), V(0.72)); g.rotate(tilt);
+  g.strokeStyle = '#101317'; g.lineWidth = 70; g.lineJoin = 'miter'; g.lineCap = 'butt'; g.miterLimit = 6;
+  for (let i = 0; i < 3; i++) {
+    const x0 = -350 + i * 270;
+    g.beginPath(); g.moveTo(x0, -180); g.lineTo(x0 + 180, 0); g.lineTo(x0, 180); g.stroke();
+  }
+  g.restore();
+  g.save(); g.translate(U(0.47), V(0.575)); g.rotate(tilt);
+  g.fillStyle = '#101317'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '800 150px Inter, Arial, sans-serif';
+  try { g.letterSpacing = '20px'; } catch (e) {}
+  g.fillText('СИЛА ВЕТРА', 0, 0);
+  try { g.letterSpacing = '0px'; } catch (e) {}
+  g.font = '600 60px Inter, Arial, sans-serif'; g.fillStyle = '#3a3f47';
+  g.fillText('П А Р У С Н А Я   Ш К О Л А', 0, 128);
+  g.restore();
   // номер
-  g.save(); g.translate(U(0.42), V(0.5)); g.rotate(-0.06);
-  g.fillStyle = '#1f2a44'; g.font = 'bold 230px Inter, Arial, sans-serif'; g.textAlign = 'center';
+  g.save(); g.translate(U(0.44), V(0.36)); g.rotate(tilt);
+  g.fillStyle = '#1f2a44'; g.font = 'bold 200px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText('211777', 0, 0); g.restore();
-  // эмблема
-  g.save(); g.translate(U(0.3), V(0.72)); g.strokeStyle = '#c0282e'; g.lineWidth = 6; g.lineCap = 'round';
-  for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12, r0 = 14 + (i % 2) * 20, r1 = 60 + (i % 3) * 20; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); g.stroke(); }
+  // эмблема класса — маленькая, у передней шкаторины
+  g.save(); g.translate(U(0.16), V(0.78)); g.strokeStyle = '#c0282e'; g.lineWidth = 5; g.lineCap = 'round';
+  for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12, r0 = 10 + (i % 2) * 14, r1 = 42 + (i % 3) * 14; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); g.stroke(); }
   g.restore();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
@@ -346,8 +364,9 @@ export function createBoat() {
   sailGeo.setIndex(sailIdx);
   const sailTex = makeSailTexture();
   const sailTexBack = sailTex.clone(); sailTexBack.wrapS = THREE.RepeatWrapping; sailTexBack.repeat.x = -1; sailTexBack.offset.x = 1;
-  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92 }));
-  const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 }));
+  // лицевые грани сетки смотрят в сторону, где u растёт влево — им зеркальная текстура, обратным — прямая
+  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.FrontSide, roughness: 0.92 }));
+  const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.BackSide, roughness: 0.92 }));
   sail.castShadow = true; sail.receiveShadow = true; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
   const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006);
