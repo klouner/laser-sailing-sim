@@ -166,6 +166,13 @@ $('btn-panel').addEventListener('click', () => $('panel').classList.toggle('open
 $('hud').addEventListener('click', () => $('hud').classList.toggle('min'));
 
 // ---------- сенсорное управление ----------
+// встроенные браузеры (Telegram, VK, Instagram) тянут страницу при вертикальном свайпе — глушим жесты вне прокручиваемой панели
+const panelEl = $('panel');
+document.addEventListener('touchmove', (e) => {
+  if (panelEl.contains(e.target)) return;
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
 let padActive = false;
 function bindPad(el, thumb, horizontal, onValue, onRelease, holds = false) {
   const track = el.querySelector('.pad-track');

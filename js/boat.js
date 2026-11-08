@@ -424,20 +424,32 @@ export function createBoat() {
   for (const y of [-0.02, 0.17]) { const pin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.09), matAlu); pin.position.set(HULL.xStern - 0.01, transomY + y, 0); heelG.add(pin); }
 
   // ----- матрос -----
-  const skin = new THREE.MeshStandardMaterial({ color: '#c99474', roughness: 0.75 });
-  const suit = new THREE.MeshStandardMaterial({ color: '#1c2430', roughness: 0.8 });
-  const vest = new THREE.MeshStandardMaterial({ color: '#f26b21', roughness: 0.7 });
+  const skin = new THREE.MeshStandardMaterial({ color: '#c99474', roughness: 0.7 });
+  const suit = new THREE.MeshStandardMaterial({ color: '#1a2029', roughness: 0.75 });
+  const suitTrim = new THREE.MeshStandardMaterial({ color: '#2b3542', roughness: 0.75 });
+  const vest = new THREE.MeshStandardMaterial({ color: '#ff5700', roughness: 0.65 });
+  const vestTrim = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.8 });
+  const shoe = new THREE.MeshStandardMaterial({ color: '#222', roughness: 0.9 });
   const sailor = new THREE.Group(); heelG.add(sailor);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.26, 8, 16), vest); torso.scale.set(1.25, 1, 0.85); torso.castShadow = true; sailor.add(torso);
-  const hips = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), suit); hips.scale.set(1.1, 0.8, 1); hips.castShadow = true; sailor.add(hips);
-  const headM = new THREE.Mesh(new THREE.SphereGeometry(0.105, 18, 14), skin); headM.castShadow = true; sailor.add(headM);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.8 })); sailor.add(cap);
-  const visor = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.012, 16, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({ color: '#f8fafc' })); sailor.add(visor);
-  const thighL = limb(suit, 0.075), thighR = limb(suit, 0.075), shinL = limb(suit, 0.06), shinR = limb(suit, 0.06);
-  const upArmA = limb(suit, 0.05), foreArmA = limb(skin, 0.042), upArmB = limb(suit, 0.05), foreArmB = limb(skin, 0.042);
-  const handA = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), skin), handB = handA.clone();
-  const footL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.09), suit), footR = footL.clone();
-  [thighL, thighR, shinL, shinR, upArmA, foreArmA, upArmB, foreArmB, handA, handB, footL, footR].forEach(o => sailor.add(o));
+  const addM = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; sailor.add(m); return m; };
+  const pelvis = addM(new THREE.SphereGeometry(1, 16, 12), suit); pelvis.scale.set(0.2, 0.13, 0.17);
+  const abdomen = addM(new THREE.CylinderGeometry(0.14, 0.16, 0.16, 16), suitTrim);
+  const chest = addM(new THREE.CapsuleGeometry(0.15, 0.2, 8, 16), vest); chest.scale.set(1.25, 1, 0.8);
+  const vestBand = addM(new THREE.TorusGeometry(0.17, 0.018, 8, 24), vestTrim); vestBand.scale.set(1.25, 1, 0.8);
+  const shoulderL = addM(new THREE.SphereGeometry(0.075, 12, 10), vest), shoulderR = addM(new THREE.SphereGeometry(0.075, 12, 10), vest);
+  const neck = addM(new THREE.CylinderGeometry(0.05, 0.055, 0.1, 12), skin);
+  const headM = addM(new THREE.SphereGeometry(0.105, 20, 16), skin);
+  const cap = addM(new THREE.SphereGeometry(0.11, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#f4f4f4', roughness: 0.8 }));
+  const visor = addM(new THREE.CylinderGeometry(0.125, 0.125, 0.012, 20, 1, false, -Math.PI / 2, Math.PI), new THREE.MeshStandardMaterial({ color: '#f4f4f4' }));
+  const glasses = addM(new THREE.BoxGeometry(0.03, 0.035, 0.16), new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.3, metalness: 0.4 }));
+  const thighL = limb(suit, 0.082), thighR = limb(suit, 0.082), shinL = limb(suitTrim, 0.065), shinR = limb(suitTrim, 0.065);
+  const kneeL = addM(new THREE.SphereGeometry(0.078, 12, 10), suit), kneeR = addM(new THREE.SphereGeometry(0.078, 12, 10), suit);
+  const upArmA = limb(suit, 0.052), foreArmA = limb(skin, 0.044), upArmB = limb(suit, 0.052), foreArmB = limb(skin, 0.044);
+  const elbowA = addM(new THREE.SphereGeometry(0.05, 10, 8), suit), elbowB = addM(new THREE.SphereGeometry(0.05, 10, 8), suit);
+  const handA = addM(new THREE.SphereGeometry(0.048, 12, 10), skin), handB = addM(new THREE.SphereGeometry(0.048, 12, 10), skin);
+  handA.scale.set(1, 0.7, 1.2); handB.scale.set(1, 0.7, 1.2);
+  const footL = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe), footR = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe);
+  [thighL, thighR, shinL, shinR, upArmA, foreArmA, upArmB, foreArmB].forEach(o => sailor.add(o));
   const handSheet = rope(heelG, matRope, 0.008);
 
   // ---------- обновление ----------
@@ -491,38 +503,49 @@ export function createBoat() {
     sailorState.hike += (Math.min(1, Math.abs(state.heel) / 16) - sailorState.hike) * Math.min(1, dt * 3);
     const h = sailorState.hike;
     const dy = deckAt(-0.35);
-    P.hip.set(-0.35, dy + 0.05, side * (0.42 + 0.22 * h));
-    const theta = 0.38 + 0.85 * h; // наклон корпуса наружу (сидя на борту)
-    const dir = P.tmp.set(-0.08, Math.cos(theta), side * Math.sin(theta)).normalize();
-    P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
-    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.04, 0.0, -side * 0.03));
-    // туловище
-    torso.position.copy(P.hip).lerp(P.shoulder, 0.58); torso.quaternion.setFromUnitVectors(Y, dir); torso.rotateY(side > 0 ? -Math.PI / 2 : Math.PI / 2);
-    hips.position.copy(P.hip);
-    headM.position.copy(P.headP); cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.02, 0)); visor.position.copy(P.headP).add(new THREE.Vector3(0.1, 0.045, 0));
-    // ноги: колени у кромки кокпита, стопы под ремнём
-    for (const [thigh, shin, foot, off] of [[thighL, shinL, footL, 0.11], [thighR, shinR, footR, -0.11]]) {
-      P.knee.set(-0.33 + off * 0.5, dy + 0.14 - 0.04 * h, side * (0.16 - 0.04 * h) + off * 0.35);
-      P.foot.set(-0.3 + off * 0.9, floorY + 0.05, -side * 0.02 + off * 0.45);
-      thigh.userData.set(P.hip.clone().add(new THREE.Vector3(0, -0.03, off * 0.8)), P.knee);
-      shin.userData.set(P.knee, P.foot);
-      foot.position.copy(P.foot); foot.rotation.set(0, side > 0 ? -0.3 : 0.3, 0);
+    // таз на кромке борта; при откренивании сдвигается наружу
+    P.hip.set(-0.35, dy + 0.06, side * (0.44 + 0.2 * h));
+    const theta = 0.35 + 0.9 * h; // наклон корпуса наружу
+    const dir = P.tmp.set(-0.06, Math.cos(theta), side * Math.sin(theta)).normalize();
+    const chestC = P.hip.clone().addScaledVector(dir, 0.34);
+    P.shoulder.copy(P.hip).addScaledVector(dir, 0.5);
+    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, 0.01, -side * 0.04));
+    const q = new THREE.Quaternion().setFromUnitVectors(Y, dir);
+    pelvis.position.copy(P.hip); pelvis.quaternion.copy(q);
+    abdomen.position.copy(P.hip).addScaledVector(dir, 0.15); abdomen.quaternion.copy(q);
+    chest.position.copy(chestC); chest.quaternion.copy(q);
+    vestBand.position.copy(P.hip).addScaledVector(dir, 0.27); vestBand.quaternion.copy(q); vestBand.rotateX(Math.PI / 2);
+    neck.position.copy(P.shoulder).addScaledVector(dir, 0.06); neck.quaternion.copy(q);
+    headM.position.copy(P.headP);
+    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -side * 0.15);
+    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2, 0);
+    glasses.position.copy(P.headP).add(new THREE.Vector3(0.09, 0.01, 0));
+    // плечи
+    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, side * 0.01)); // заднее плечо
+    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, side * 0.01));  // переднее плечо
+    shoulderL.position.copy(shA); shoulderR.position.copy(shB);
+    // ноги: колени у кромки кокпита, стопы под ремнём; при откренивании ноги выпрямляются
+    for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.11], [thighR, shinR, kneeR, footR, -0.11]]) {
+      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -side * 0.06));
+      P.knee.set(-0.35 + off * 0.9, dy + 0.16 - 0.1 * h, side * (0.14 - 0.1 * h));
+      P.foot.set(-0.3 + off * 0.9, floorY + 0.05, -side * 0.03);
+      thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, P.foot);
+      knee.position.copy(P.knee);
+      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -side * 0.02)); foot.rotation.set(0, side * 0.35, 0);
     }
     // руки: задняя — румпель-удлинитель, передняя — шкот
-    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.13, 0, side * 0.02));
-    const shB = P.shoulder.clone().add(new THREE.Vector3(0.13, 0, side * 0.02));
-    P.handA.set(-0.9, dy + 0.25 + 0.12 * h, side * (0.3 + 0.2 * h));
-    P.handB.set(0.05, dy + 0.36 - 0.05 * h, side * (0.2 + 0.15 * h));
-    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(0, -0.08, side * 0.12));
-    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.05, -0.1, side * 0.1));
-    upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); handA.position.copy(P.handA);
-    upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); handB.position.copy(P.handB);
+    P.handA.set(-0.95, dy + 0.28 + 0.12 * h, side * (0.28 + 0.22 * h));
+    P.handB.set(0.1, dy + 0.4 - 0.05 * h, side * (0.16 + 0.18 * h));
+    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, side * 0.14));
+    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, side * 0.12));
+    upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
+    upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
     // удлинитель румпеля — в заднюю руку
     const local = rudderPivot.worldToLocal(heelG.localToWorld(P.handA.clone()));
     const d = local.sub(extPivot.position);
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
     // шкот от блока в переднюю руку
-    handSheet([blockTop, P.handB.clone().add(new THREE.Vector3(0, -0.02, 0))]);
+    handSheet([blockTop, P.handB.clone().add(new THREE.Vector3(0, -0.03, 0))]);
   }
 
   function update(state, out, ctl, dt, t) {

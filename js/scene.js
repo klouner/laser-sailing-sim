@@ -184,10 +184,10 @@ const _unitY = new THREE.Vector3(0, 1, 0);
 export class VectorArrow {
   constructor(scene, color, label) {
     this.color = color;
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1, emissive: color, emissiveIntensity: 0.25 });
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.15, emissive: color, emissiveIntensity: 0.12, transparent: true, opacity: 0.92 });
     this.group = new THREE.Group();
-    this.shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), mat);   // масштабируется
-    this.head = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), mat);
+    this.shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 16), mat);   // масштабируется
+    this.head = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 24), mat);
     this.shaft.castShadow = true; this.head.castShadow = true;
     this.group.add(this.shaft); this.group.add(this.head);
     scene.add(this.group);
@@ -220,7 +220,7 @@ export class VectorArrow {
     if (len < 0.25 || !this.visible) { this.group.visible = false; this.label.visible = false; return; }
     this.group.visible = true; this.label.visible = this.showLabel;
     dir.normalize();
-    const r = 0.035 * thickness, headLen = Math.min(0.38, len * 0.35), headR = 0.11 * thickness;
+    const r = 0.018 * thickness, headLen = Math.min(0.42, len * 0.3), headR = 0.065 * thickness;
     this.group.position.copy(from);
     this.group.quaternion.setFromUnitVectors(_unitY, dir);
     const shaftLen = len - headLen;
