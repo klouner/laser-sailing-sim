@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Лазер 3D — как управлять швертботом</title>
+<meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">⛵</span>
+      <div>
+        <div class="title">Лазер&nbsp;3D</div>
+        <div class="subtitle">Ветер · Парус · Руль · Курс</div>
+      </div>
+    </div>
+    <div id="status" class="status">
+      <div class="status-main">
+        <span id="pos-name" class="pos-name">Галфвинд</span>
+        <span id="tack-name" class="tack">правый галс</span>
+      </div>
+      <div id="hint" class="hint">Подтяните шкот, пока парус не перестанет заполаскивать</div>
+    </div>
+    <button id="btn-panel" class="icon-btn" title="Показать/скрыть панель">☰</button>
+  </header>
+
+  <aside id="panel">
+    <section class="card">
+      <h2>Ветер</h2>
+      <label class="row">
+        <span>Откуда дует <b id="v-windFrom">0°</b> <i id="v-windName">С</i></span>
+        <input type="range" id="windFrom" min="0" max="359" step="1" value="0">
+      </label>
+      <label class="row">
+        <span>Сила ветра <b id="v-windSpeed">10 уз</b></span>
+        <input type="range" id="windSpeed" min="2" max="25" step="0.5" value="10">
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Лодка</h2>
+      <label class="row">
+        <span>Курс (нос) <b id="v-heading">90°</b> <i id="v-twa"></i></span>
+        <input type="range" id="heading" min="0" max="359" step="1" value="90">
+      </label>
+      <label class="row">
+        <span>Шкот — гик до <b id="v-sheet">45°</b> <small>(W/S или ↑/↓)</small></span>
+        <input type="range" id="sheet" min="0" max="90" step="1" value="45">
+      </label>
+      <label class="row">
+        <span>Руль <b id="v-rudder">прямо</b> <small>(A/D или ←/→)</small></span>
+        <input type="range" id="rudder" min="-35" max="35" step="1" value="0" class="center">
+      </label>
+      <div class="checks">
+        <label><input type="checkbox" id="autoSheet"> Автошкот (оптимальный угол атаки)</label>
+        <label><input type="checkbox" id="lockHeading"> Фиксировать курс (руль не поворачивает)</label>
+        <label><input type="checkbox" id="rudderReturn" checked> Руль сам возвращается в центр</label>
+      </div>
+      <div class="btns">
+        <button id="btn-pause" class="btn">⏸ Пауза</button>
+        <button id="btn-reset" class="btn">↺ Сброс</button>
+        <button id="btn-tack" class="btn" title="Автоматически повернуть оверштаг">⟲ Оверштаг</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Приборы</h2>
+      <div class="grid">
+        <div class="stat"><span>Скорость</span><b id="s-speed">0.0 уз</b></div>
+        <div class="stat"><span>VMG</span><b id="s-vmg">0.0 уз</b></div>
+        <div class="stat"><span>Вымпельный ветер</span><b id="s-aws">10 уз · 90°</b></div>
+        <div class="stat"><span>Угол атаки паруса</span><b id="s-aoa">0°</b></div>
+        <div class="stat"><span>Крен</span><b id="s-heel">0°</b></div>
+        <div class="stat"><span>Дрейф</span><b id="s-leeway">0°</b></div>
+        <div class="stat wide"><span>Парус</span><b id="s-sail">—</b></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Вид</h2>
+      <div class="seg" id="cam-seg">
+        <button data-cam="chase" class="active">За лодкой</button>
+        <button data-cam="top">Сверху</button>
+        <button data-cam="side">Сбоку</button>
+        <button data-cam="free">Свободно</button>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="showTrue" checked> <span class="sw" style="--c:#3b82f6"></span>Истинный ветер</label>
+        <label><input type="checkbox" id="showApp" checked> <span class="sw" style="--c:#22d3ee"></span>Вымпельный ветер</label>
+        <label><input type="checkbox" id="showVel" checked> <span class="sw" style="--c:#22c55e"></span>Скорость лодки</label>
+        <label><input type="checkbox" id="showForce" checked> <span class="sw" style="--c:#f97316"></span>Сила на парусе</label>
+        <label><input type="checkbox" id="showNoGo" checked> <span class="sw" style="--c:#ef4444"></span>Мёртвая зона</label>
+        <label><input type="checkbox" id="showStreaks" checked> Струи ветра</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>Как это работает</summary>
+        <div class="theory">
+          <p><b>Ветер</b> задаётся компасным направлением, <em>откуда</em> он дует. Синяя стрелка — истинный ветер. Голубая — вымпельный: тот, что чувствует парус с учётом хода лодки. Чем быстрее лодка, тем сильнее вымпельный ветер заходит вперёд.</p>
+          <p><b>Курсы относительно ветра.</b> Левентик (носом в ветер, ±45°) — мёртвая зона, парус полощет и лодка останавливается. Бейдевинд — острый курс против ветра, галфвинд — ветер в борт, бакштаг — ветер сзади-сбоку, фордевинд — ветер в корму.</p>
+          <p><b>Шкот</b> ограничивает, насколько гик может уйти под ветер. Парус работает как крыло: нужен угол атаки ≈ 10–25° к вымпельному ветру. Если шкот перетравлен — парус заполаскивает (нет тяги). Если перебран — поток срывается, тяга падает, крен растёт. На фордевинде парус стоит поперёк и работает как парашют.</p>
+          <p><b>Руль.</b> Лодка поворачивает туда, куда переложено перо руля. Румпель при этом двигается в <em>противоположную</em> сторону: румпель влево — лодка направо. Руль работает только на ходу: без скорости лодка не слушается.</p>
+          <p><b>Галс</b> определяется бортом, с которого дует ветер: ветер справа — правый галс (гик слева). Поворот носом через ветер — оверштаг, кормой — фордевинд (гик резко перелетает!).</p>
+          <p><b>Крен и откренивание.</b> Боковая сила на парусе кренит лодку; матрос откренивает, вывешиваясь на наветренный борт. Накренённая лодка сама приводится к ветру — приходится держать руль.</p>
+          <p><b>VMG</b> — скорость сближения с ветром (или удаления от него): на лавировке максимум VMG обычно в остром бейдевинде ~45°, а не в самом остром курсе.</p>
+        </div>
+      </details>
+    </section>
+    <footer class="foot">Мышь/палец: вращать камеру · колесо: зум · Space — пауза · R — сброс · C — камера</footer>
+  </aside>
+
+  <div id="hud">
+    <canvas id="minimap" width="300" height="300"></canvas>
+    <div class="hud-cap">Вид сверху: север вверху</div>
+  </div>
+
+  <div id="loading"><div class="spinner"></div><div>Загружаем лодку…</div></div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
