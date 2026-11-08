@@ -544,6 +544,8 @@ export function createBoat() {
     const local = rudderPivot.worldToLocal(heelG.localToWorld(P.handA.clone()));
     const d = local.sub(extPivot.position);
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
+    const extLen = THREE.MathUtils.clamp(d.length(), 0.5, 1.3);
+    extension.scale.y = extLen / 1.1; extension.position.x = extLen / 2; extGrip.position.x = extLen - 0.1;
     // шкот от блока в переднюю руку
     handSheet([blockTop, P.handB.clone().add(new THREE.Vector3(0, -0.03, 0))]);
   }
@@ -561,10 +563,13 @@ export function createBoat() {
     windex.rotation.y = -out.AWA * DEG - rig.rotation.y;
     updateSail(out, dt);
 
-    // гика-шкот: нок гика → погон → середина гика → блок в кокпите
-    const bEnd = boomBlockEnd.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
-    const bMid = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
-    sheetRope([bEnd, travP.clone().add(new THREE.Vector3(0, 0.03, 0)), bMid, blockTop]);
+    // гика-шкот: блок на погоне → блок на ноке гика → обратно на погон (тали 2:1) → вдоль гика к среднему блоку → блок в кокпите
+    const rot = rig.rotation.y;
+    const bEnd = boomBlockEnd.clone().applyAxisAngle(Y, rot).add(mastBase);
+    const bEnd2 = boomBlockEnd.clone().add(new THREE.Vector3(0.09, 0, 0)).applyAxisAngle(Y, rot).add(mastBase);
+    const bMid = boomBlockMid.clone().applyAxisAngle(Y, rot).add(mastBase);
+    const tv = travP.clone().add(new THREE.Vector3(0, 0.03, 0));
+    sheetRope([tv.clone().add(new THREE.Vector3(0, 0, 0.02)), bEnd, tv.clone().add(new THREE.Vector3(0, 0, -0.02)), bEnd2, bMid, blockTop]);
 
     rudderPivot.rotation.y = ctl.rudder * DEG;
     if (sailor.visible) updateSailor(state, dt);
