@@ -85,9 +85,9 @@ export function makeWater() {
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec3 wp = (modelMatrix * vec4(position,1.0)).xyz;
         float wv = 0.0;
-        wv += 0.06 * sin(dot(wp.xz, vec2(0.9, 0.35)) * 0.9 + uTime * 1.4);
-        wv += 0.04 * sin(dot(wp.xz, vec2(-0.5, 0.8)) * 1.7 + uTime * 2.1);
-        wv += 0.025 * sin(dot(wp.xz, vec2(0.3, -0.95)) * 3.1 + uTime * 2.9);
+        wv += 0.045 * sin(dot(wp.xz, vec2(0.9, 0.35)) * 0.9 + uTime * 1.4);
+        wv += 0.03 * sin(dot(wp.xz, vec2(-0.5, 0.8)) * 1.7 + uTime * 2.1);
+        wv += 0.02 * sin(dot(wp.xz, vec2(0.3, -0.95)) * 3.1 + uTime * 2.9);
         transformed.y += wv;`);
   };
   const mesh = new THREE.Mesh(geo, mat);
@@ -125,9 +125,9 @@ export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(10,16,28,0.
 // ---------- компасное кольцо на воде ----------
 export function makeCompassRing() {
   const g = new THREE.Group();
-  g.position.y = 0.03;
+  g.position.y = 0.16;
   const R = 3.6;
-  const ring = new THREE.Mesh(new THREE.RingGeometry(R - 0.12, R, 128), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(R - 0.12, R, 128), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2; g.add(ring);
   // риски каждые 30°
   const tickPts = [];
@@ -208,7 +208,7 @@ export class VectorArrow {
   set(from, to, text, dt = 0) {
     const dir = to.clone().sub(from); const len = dir.length();
     if (len < 0.15 || !this.visible) { this.arrow.visible = false; this.label.visible = false; return; }
-    this.arrow.visible = true; this.label.visible = true;
+    this.arrow.visible = true; this.label.visible = this.showLabel !== false;
     this.arrow.position.copy(from);
     this.arrow.setDirection(dir.normalize());
     this.arrow.setLength(len, Math.min(0.6, len * 0.3), Math.min(0.35, len * 0.18));
@@ -216,7 +216,7 @@ export class VectorArrow {
     this._since += dt;
     if (text && text !== this._text && this._since > 0.25) { this._since = 0; this.draw(text); }
   }
-  setVisible(v) { this.visible = v; if (!v) { this.arrow.visible = false; this.label.visible = false; } }
+  setVisible(v, labels = true) { this.visible = v; this.showLabel = labels; if (!v) { this.arrow.visible = false; this.label.visible = false; } }
 }
 
 // ---------- струи ветра ----------

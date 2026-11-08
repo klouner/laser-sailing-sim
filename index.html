@@ -30,11 +30,17 @@
       </div>
     </div>
     <div id="status" class="status">
-      <div class="status-main">
-        <span id="pos-name" class="pos-name">Галфвинд</span>
-        <span id="tack-name" class="tack">правый галс</span>
+      <div class="speedo">
+        <div class="speedo-main"><b id="speed-big">0.0</b><span>уз</span></div>
+        <div class="speedo-sub">VMG <b id="vmg-big">0.0</b></div>
       </div>
-      <div id="hint" class="hint">Подтяните шкот, пока парус не перестанет заполаскивать</div>
+      <div class="status-text">
+        <div class="status-main">
+          <span id="pos-name" class="pos-name">Галфвинд</span>
+          <span id="tack-name" class="tack">правый галс</span>
+        </div>
+        <div id="hint" class="hint">Подтяните шкот, пока парус не перестанет заполаскивать</div>
+      </div>
     </div>
     <button id="btn-panel" class="icon-btn" title="Показать/скрыть панель">☰</button>
   </header>
@@ -50,6 +56,9 @@
         <span>Сила ветра <b id="v-windSpeed">10 уз</b></span>
         <input type="range" id="windSpeed" min="2" max="25" step="0.5" value="10">
       </label>
+      <div class="checks">
+        <label><input type="checkbox" id="compassWind"> 📱 Ветер по компасу телефона <small id="compassState"></small></label>
+      </div>
     </section>
 
     <section class="card">
@@ -106,6 +115,8 @@
         <label><input type="checkbox" id="showForce" checked> <span class="sw" style="--c:#f97316"></span>Сила на парусе</label>
         <label><input type="checkbox" id="showNoGo" checked> <span class="sw" style="--c:#ef4444"></span>Мёртвая зона</label>
         <label><input type="checkbox" id="showStreaks" checked> Струи ветра</label>
+        <label><input type="checkbox" id="showLabels" checked> Подписи у стрелок</label>
+        <label><input type="checkbox" id="showSailor" checked> Матрос</label>
       </div>
     </section>
 
@@ -136,6 +147,7 @@
       <button id="t-pause" class="t-btn" title="Пауза">⏸</button>
       <button id="t-cam" class="t-btn" title="Камера">📷</button>
       <button id="t-tack" class="t-btn">⟲ Оверштаг</button>
+      <button id="t-compass" class="t-btn" title="Ветер по компасу телефона">🧭</button>
       <button id="t-auto" class="t-btn">Автошкот</button>
       <button id="t-panel" class="t-btn" title="Настройки">☰</button>
     </div>

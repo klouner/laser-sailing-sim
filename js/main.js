@@ -73,7 +73,9 @@ arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.45;
 const state = createState();
 const ctl = defaultControls();
 ctl.heading = state.heading;
-const show = { trueWind: true, appWind: true, vel: true, force: true, noGo: true, streaks: true };
+const isTouch = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
+const show = { trueWind: true, appWind: true, vel: true, force: true, noGo: true, streaks: true, labels: !isTouch, sailor: true };
+$('showLabels').checked = show.labels;
 let camMode = 'chase';
 const keys = {};
 let autopilot = null; // { target }
@@ -90,7 +92,7 @@ function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, 0, 90); ui.sheet.val
 function setWindFrom(v) { ctl.windFrom = ((v % 360) + 360) % 360; ui.windFrom.value = Math.round(ctl.windFrom); }
 function setAutoSheet(v) { ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
 
-ui.windFrom.addEventListener('input', () => { ctl.windFrom = +ui.windFrom.value; });
+ui.windFrom.addEventListener('input', () => { ctl.windFrom = +ui.windFrom.value; if (devCompass.on) setCompass(false); });
 ui.windSpeed.addEventListener('input', () => { ctl.windSpeed = +ui.windSpeed.value; });
 ui.heading.addEventListener('input', () => { state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; });
 ui.sheet.addEventListener('input', () => { setSheet(+ui.sheet.value); });
@@ -111,8 +113,54 @@ $('btn-tack').addEventListener('click', () => {
   ui.lockHeading.checked = false; ctl.lockHeading = false;
 });
 document.querySelectorAll('#cam-seg button').forEach(b => b.addEventListener('click', () => setCamera(b.dataset.cam)));
-for (const [id, key] of [['showTrue', 'trueWind'], ['showApp', 'appWind'], ['showVel', 'vel'], ['showForce', 'force'], ['showNoGo', 'noGo'], ['showStreaks', 'streaks']]) {
-  $(id).addEventListener('change', (e) => { show[key] = e.target.checked; });
+for (const [id, key] of [['showTrue', 'trueWind'], ['showApp', 'appWind'], ['showVel', 'vel'], ['showForce', 'force'], ['showNoGo', 'noGo'], ['showStreaks', 'streaks'], ['showLabels', 'labels'], ['showSailor', 'sailor']]) {
+  $(id).addEventListener('change', (e) => { show[key] = e.target.checked; if (key === 'sailor') boat.setSailor(show.sailor); });
+}
+
+// ---------- ветер по компасу устройства ----------
+const devCompass = { on: false, heading: null, smooth: null };
+function onOrientation(e) {
+  let hd = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) hd = e.webkitCompassHeading; // iOS
+  else if (e.absolute && typeof e.alpha === 'number') hd = (360 - e.alpha) % 360; // Android
+  else if (typeof e.alpha === 'number') hd = (360 - e.alpha) % 360;
+  if (hd === null) return;
+  // учёт поворота экрана
+  const so = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+  devCompass.heading = ((hd + so) % 360 + 360) % 360;
+}
+async function setCompass(on) {
+  if (on) {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== 'granted') throw new Error('denied');
+      }
+      if (!('DeviceOrientationEvent' in window)) throw new Error('unsupported');
+      window.addEventListener('deviceorientationabsolute', onOrientation, true);
+      window.addEventListener('deviceorientation', onOrientation, true);
+      devCompass.on = true; devCompass.heading = null; devCompass.smooth = null;
+      $('compassState').textContent = '— ждём данные компаса…';
+    } catch (err) {
+      devCompass.on = false;
+      $('compassState').textContent = err.message === 'denied' ? '— нет разрешения на датчики' : '— компас недоступен на этом устройстве';
+    }
+  } else {
+    window.removeEventListener('deviceorientationabsolute', onOrientation, true);
+    window.removeEventListener('deviceorientation', onOrientation, true);
+    devCompass.on = false; $('compassState').textContent = '';
+  }
+  $('compassWind').checked = devCompass.on;
+  $('t-compass').classList.toggle('active', devCompass.on);
+}
+$('compassWind').addEventListener('change', (e) => setCompass(e.target.checked));
+$('t-compass').addEventListener('click', () => setCompass(!devCompass.on));
+function updateCompass(dt) {
+  if (!devCompass.on || devCompass.heading === null) return;
+  if (devCompass.smooth === null) devCompass.smooth = devCompass.heading;
+  devCompass.smooth = ((devCompass.smooth + norm180(devCompass.heading - devCompass.smooth) * Math.min(1, dt * 6)) % 360 + 360) % 360;
+  setWindFrom(devCompass.smooth);
+  $('compassState').textContent = `— ${Math.round(devCompass.smooth)}°`;
 }
 $('btn-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
 $('hud').addEventListener('click', () => $('hud').classList.toggle('min'));
@@ -245,6 +293,8 @@ function updateUI(out, dt) {
   const hint = $('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
 
   $('s-speed').textContent = `${fmt(out.speedKn)} уз`;
+  $('speed-big').textContent = fmt(out.speedKn);
+  $('vmg-big').textContent = `${fmt(Math.abs(out.vmgKn))} ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`;
   const vmg = out.vmgKn;
   $('s-vmg').textContent = `${fmt(Math.abs(vmg))} уз ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`;
   $('s-aws').textContent = `${fmt(out.AWS / KN, 1)} уз · ${Math.round(out.awaAbs)}°`;
@@ -273,6 +323,7 @@ function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   t += dt;
   handleKeys(dt);
+  updateCompass(dt);
 
   // автопилот (оверштаг / фордевинд)
   if (autopilot) {
@@ -304,18 +355,18 @@ function frame() {
   // стрелки
   const center = boat.root.position.clone(); center.y = 0.75;
   const WS = 0.5; // м на 1 м/с ветра
-  arrows.trueWind.setVisible(show.trueWind);
-  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, 0.75, center.z - out.Wz * WS), center, `Истинный ветер ${fmt(ctl.windSpeed, 0)} уз`, dt);
-  arrows.appWind.setVisible(show.appWind);
+  arrows.trueWind.setVisible(show.trueWind, show.labels);
+  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, 0.75, center.z - out.Wz * WS), center, `Ветер ${fmt(ctl.windSpeed, 0)} уз`, dt);
+  arrows.appWind.setVisible(show.appWind, show.labels);
   const appFrom = new THREE.Vector3(center.x - out.Ax * WS, 2.3, center.z - out.Az * WS);
   const appTo = new THREE.Vector3(center.x, 2.3, center.z);
-  arrows.appWind.set(appFrom, appTo, `Вымпельный ${fmt(out.AWS / KN, 0)} уз · ${Math.round(out.awaAbs)}°`, dt);
-  arrows.vel.setVisible(show.vel);
-  arrows.vel.set(center, new THREE.Vector3(center.x + out.Vx * 1.3, 0.75, center.z + out.Vz * 1.3), `Скорость ${fmt(out.speedKn)} уз`, dt);
-  arrows.force.setVisible(show.force);
+  arrows.appWind.set(appFrom, appTo, `Вымпельный ${fmt(out.AWS / KN, 0)} уз`, dt);
+  arrows.vel.setVisible(show.vel, show.labels);
+  arrows.vel.set(center, new THREE.Vector3(center.x + out.Vx * 1.3, 0.75, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
+  arrows.force.setVisible(show.force, show.labels);
   const fs = 0.012;
   const fOrigin = boat.root.position.clone().add(boatForward().multiplyScalar(0.1)); fOrigin.y = 1.6;
-  arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.6, fOrigin.z + out.forceWorldZ * fs), `Сила ${Math.round(out.Fmag)} Н`, dt);
+  arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.6, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
 
   ctl.sheetShown = out.sheet;
   updateTouch();

@@ -15,7 +15,14 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-famil
 .brand .logo{font-size:26px}
 .brand .title{font-weight:700;font-size:16px;letter-spacing:.2px}
 .brand .subtitle{color:var(--muted);font-size:11px;margin-top:1px}
-.status{flex:1;max-width:640px;background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;min-width:0}
+.status{flex:1;max-width:680px;background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px 8px 10px;min-width:0;display:flex;gap:14px;align-items:center}
+.speedo{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);border-radius:12px;padding:6px 12px;min-width:92px}
+.speedo-main{display:flex;align-items:baseline;gap:4px;line-height:1}
+.speedo-main b{font-size:30px;font-weight:700;color:#bbf7d0;font-variant-numeric:tabular-nums}
+.speedo-main span{font-size:12px;color:#86efac}
+.speedo-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.speedo-sub b{color:#d1fae5;font-weight:600}
+.status-text{min-width:0;flex:1}
 .status-main{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .pos-name{font-weight:700;font-size:18px}
 .tack{color:var(--muted);font-size:13px}
@@ -103,7 +110,9 @@ details[open] summary::before{transform:rotate(90deg)}
   .brand .logo{font-size:20px}
   .brand .title{font-size:14px}
   .brand .subtitle{display:none}
-  .status{flex-basis:100%;max-width:none;padding:7px 10px}
+  .status{flex-basis:100%;max-width:none;padding:6px 10px 6px 6px;gap:10px}
+  .speedo{min-width:78px;padding:4px 8px}
+  .speedo-main b{font-size:26px}
   .pos-name{font-size:15px}
   .tack{font-size:11px}
   .hint{font-size:12px;margin-top:2px}
@@ -113,7 +122,7 @@ details[open] summary::before{transform:rotate(90deg)}
   #panel.open ~ #touch{display:none}
   #panel .card{background:rgba(255,255,255,.05)}
   #panel .foot{display:none}
-  #hud{bottom:auto;top:118px;left:10px;padding:4px}
+  #hud{bottom:auto;top:128px;left:10px;padding:4px}
   #minimap{width:132px;height:132px}
   .hud-cap{display:none}
   #hud.min{padding:6px 10px}
