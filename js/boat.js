@@ -699,8 +699,12 @@ export function createBoat() {
     const EXT_LEN = 1.05;
     // задняя рука: удлинитель румпеля держится поперёк корпуса у бедра; конец удлинителя — на сфере EXT_LEN вокруг шарнира
     const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(new THREE.Vector3()));
-    const wantA = new THREE.Vector3(SS.x - 0.15, dy + 0.34 - 0.08 * crouch, lateral + sv * 0.12 * (1 - crouch));
-    P.handA.copy(solveTwoSpheres(pivotHull, EXT_LEN, shA, REACH, wantA));
+    // удобный хват: сбоку-сзади от таза, снаружи торса (торс ~0.19 м в ширину); кисть скользит по удлинителю
+    const wantA = new THREE.Vector3(SS.x - 0.2, dy + 0.3 - 0.06 * crouch, lateral + sv * 0.27 * (1 - crouch) + sv * 0.12 * crouch);
+    const toWant = wantA.clone().sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
+    const grip = THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN);
+    P.handA.copy(pivotHull).addScaledVector(toWant, grip);
+    clampReach(shA, P.handA, REACH);
     // передняя рука: шкот; на фордевинде — участок шкота от блока к гику
     if (run) {
       const bm = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
@@ -714,8 +718,8 @@ export function createBoat() {
     solveElbow(shB, P.handB, L1, L2, new THREE.Vector3(0.2, -1, sv * 0.3), P.elbowB);
     upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
     upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
-    // удлинитель румпеля направлен в кисть, длина постоянная
-    const local = rudderPivot.worldToLocal(heelG.localToWorld(P.handA.clone()));
+    // удлинитель румпеля направлен на точку хвата, кисть лежит на нём, длина постоянная
+    const local = rudderPivot.worldToLocal(heelG.localToWorld(pivotHull.clone().addScaledVector(toWant, EXT_LEN)));
     const d = local.sub(extPivot.position);
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
     extension.scale.y = EXT_LEN / 1.1; extension.position.x = EXT_LEN / 2; extGrip.position.x = EXT_LEN - 0.1;
