@@ -460,7 +460,7 @@ function updateUI(out, dt) {
   if (document.activeElement !== ui.rudder) ui.rudder.value = r;
 
   $('pos-name').textContent = out.pos.name;
-  $('tack-name').textContent = `${out.tack} · ${out.pos.desc} · ${Math.round(out.twaAbs)}° к ветру`;
+  $('tack-name').textContent = window.innerWidth < 420 ? `${out.tack} · ${Math.round(out.twaAbs)}° к ветру` : `${out.tack} · ${out.pos.desc} · ${Math.round(out.twaAbs)}° к ветру`;
   // подсказка меняется не чаще, чем раз в 0.6 с, чтобы не мигала при быстрых действиях
   if (out.hint !== updateUI.pendingHint) { updateUI.pendingHint = out.hint; updateUI.pendingSince = performance.now(); }
   if (out.hint !== updateUI.shownHint && performance.now() - updateUI.pendingSince > 600) {
