@@ -19,3 +19,12 @@ export const GFORM = {
 // Вариант 2: свой сервер (server/) или Cloudflare Worker (worker/) — адрес по HTTPS
 // или публичный блоб jsonblob.com (https://jsonblob.com/api/jsonBlob/<id>)
 export const LEADERBOARD_URL = '';
+
+// ---------- Статистика посещений ----------
+// Отдельная Google Форма с тремя короткими полями: «Событие», «Длительность», «Устройство».
+// action — https://docs.google.com/forms/d/e/<ID>/formResponse; entry.* — из предзаполненной ссылки.
+// Пока null — ничего не отправляется.
+export const ANALYTICS = null;
+// пример:
+// export const ANALYTICS = { action: 'https://docs.google.com/forms/d/e/1FAIpQL.../formResponse',
+//   eventEntry: 'entry.111', durationEntry: 'entry.222', deviceEntry: 'entry.333' };

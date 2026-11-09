@@ -7,6 +7,7 @@ import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
 import { LESSONS, createLessonRunner } from './lessons.js';
 import { loadTop, isRecord, submit, rememberName, savedName, isShared } from './leaderboard.js';
+import { initAnalytics } from './analytics.js';
 
 const DEG = Math.PI / 180;
 const $ = (id) => document.getElementById(id);
@@ -578,3 +579,4 @@ function frame() {
 
 frame();
 requestAnimationFrame(() => $('loading').classList.add('hide'));
+initAnalytics();

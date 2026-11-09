@@ -485,7 +485,7 @@ export function createBoat() {
   const sailTex = makeSailTexture(false);
   const sailTexBack = makeSailTexture(true);
   // лицевым граням — прямые глифы, обратным — отражённые
-  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92 }));
+  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92, shadowSide: THREE.DoubleSide }));
   const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 }));
   sail.castShadow = true; sail.receiveShadow = true; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
