@@ -213,8 +213,15 @@ function makeSailTexture(mirrorGlyphs = false) {
   const ch = luff(0.86);
   g.save(); g.translate(...P(ch.x - 0.08, ch.y)); g.rotate(-0.08); if (mirrorGlyphs) { g.translate(0.19 * K, 0); g.scale(-1, 1); } chevrons(g, 0, 0, 0.11 * K, '#ffffff', 0.095 * K); g.restore();
   // латы: перпендикулярно задней шкаторине
-  const batten = (s, len, color, wpx) => { const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s); g.strokeStyle = color; g.lineWidth = wpx; g.beginPath(); g.moveTo(...P(L.x, L.y)); g.lineTo(...P(L.x + perp.x * len, L.y + perp.y * len)); g.stroke(); };
-  batten(1.2, 0.95, 'rgba(60,60,60,0.5)', 0.02 * K); batten(2.25, 0.85, 'rgba(60,60,60,0.5)', 0.02 * K); batten(3.2, 0.7, 'rgba(60,60,60,0.5)', 0.02 * K); batten(4.3, 0.5, 'rgba(255,255,255,0.4)', 0.018 * K);
+  // латкарманы: две тонкие строчки по краям кармана шириной 5 см
+  const batten = (s, len, color) => {
+    const L = SAIL.clew.clone().addScaledVector(SAIL.leechDir, s);
+    const nx = -perp.y, ny = perp.x; // поперёк кармана
+    g.strokeStyle = color; g.lineWidth = 0.004 * K;
+    for (const o of [-0.025, 0.025]) { g.beginPath(); g.moveTo(...P(L.x + nx * o, L.y + ny * o)); g.lineTo(...P(L.x + perp.x * len + nx * o, L.y + perp.y * len + ny * o)); g.stroke(); }
+    g.beginPath(); g.moveTo(...P(L.x + perp.x * len + nx * 0.025, L.y + perp.y * len + ny * 0.025)); g.lineTo(...P(L.x + perp.x * len - nx * 0.025, L.y + perp.y * len - ny * 0.025)); g.stroke();
+  };
+  batten(1.2, 0.95, 'rgba(70,70,70,0.35)'); batten(2.25, 0.85, 'rgba(70,70,70,0.35)'); batten(3.2, 0.7, 'rgba(70,70,70,0.35)'); batten(4.3, 0.5, 'rgba(255,255,255,0.3)');
   // усиления углов
   g.fillStyle = 'rgba(120,120,120,0.35)';
   g.beginPath(); g.moveTo(...P(SAIL.tack.x, SAIL.tack.y)); g.lineTo(...P(SAIL.tack.x - 0.45, SAIL.tack.y)); g.lineTo(...P(SAIL.tack.x, SAIL.tack.y + 0.5)); g.closePath(); g.fill();
@@ -287,7 +294,7 @@ function limb(mat, r) {
 // Трос: ломаная по точкам; sags[i] — провисание i-го отрезка (м, вниз по y)
 function rope(parent, mat, r = 0.0075) {
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
-  mesh.castShadow = true; parent.add(mesh);
+  mesh.castShadow = false; parent.add(mesh);
   return (points, sags = null) => {
     const path = new THREE.CurvePath();
     let segs = 0;
