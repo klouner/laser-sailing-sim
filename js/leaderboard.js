@@ -30,7 +30,7 @@ async function gformGet() {
   let iN = head.findIndex(s => s.includes('имя') || s.includes('name')), iT = head.findIndex(s => s.includes('время') || s.includes('time')), iD = head.findIndex(s => s.includes('отметка') || s.includes('timestamp'));
   if (iN < 0) iN = 1; if (iT < 0) iT = 2; if (iD < 0) iD = 0;
   // формат: либо отдельная колонка времени, либо «Имя | 151.2» в одной ячейке
-  const list = rows.slice(1).map(r => {
+  const list = rows.slice(1).filter(r => !String(r[iN] || '').trim().startsWith('#')).map(r => {
     let name = String(r[iN] || '').trim(), time = parseFloat(String(r[iT] || '').replace(',', '.'));
     const sep = name.lastIndexOf('|');
     if (sep >= 0) { const t2 = parseFloat(name.slice(sep + 1).trim().replace(',', '.')); if (!isNaN(t2)) { time = t2; name = name.slice(0, sep).trim(); } }

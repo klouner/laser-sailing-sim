@@ -24,7 +24,8 @@ export const LEADERBOARD_URL = '';
 // Отдельная Google Форма с тремя короткими полями: «Событие», «Длительность», «Устройство».
 // action — https://docs.google.com/forms/d/e/<ID>/formResponse; entry.* — из предзаполненной ссылки.
 // Пока null — ничего не отправляется.
-export const ANALYTICS = null;
+// { useLeaderboardForm: true } — писать события в форму рекордов: «Имя» = «#событие · устройство», «Время» = секунды
+export const ANALYTICS = { useLeaderboardForm: true };
 // пример:
 // export const ANALYTICS = { action: 'https://docs.google.com/forms/d/e/1FAIpQL.../formResponse',
 //   eventEntry: 'entry.111', durationEntry: 'entry.222', deviceEntry: 'entry.333' };

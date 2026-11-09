@@ -1,8 +1,13 @@
 // Простая статистика: «открытие» при загрузке и «сеанс» с длительностью (в секундах активного времени) при уходе.
 // Отправка — в Google Форму через sendBeacon/fetch no-cors, без cookies и без сторонних скриптов.
-import { ANALYTICS } from './config.js';
+import { ANALYTICS as CFG, GFORM } from './config.js';
 
 export function initAnalytics() {
+  let ANALYTICS = CFG;
+  if (CFG && CFG.useLeaderboardForm) {
+    if (!GFORM) return;
+    ANALYTICS = { action: GFORM.action, eventEntry: GFORM.nameEntry, durationEntry: GFORM.timeEntry, deviceEntry: null, inline: true };
+  }
   if (!ANALYTICS || !ANALYTICS.action) return;
   const ua = navigator.userAgent;
   const device = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobi/.test(ua) ? 'Mobile' : 'Desktop';
@@ -10,7 +15,7 @@ export function initAnalytics() {
   const devStr = `${device} ${w}x${h}${/Telegram|TelegramBot|VKAndroidApp|VKClient|Instagram|FBAN|FBAV/.test(ua) ? ' webview' : ''}`;
   const send = (event, duration, beacon) => {
     const fd = new FormData();
-    fd.append(ANALYTICS.eventEntry, event);
+    fd.append(ANALYTICS.eventEntry, ANALYTICS.inline ? `#${event} · ${devStr}` : event);
     fd.append(ANALYTICS.durationEntry, String(Math.round(duration)));
     if (ANALYTICS.deviceEntry) fd.append(ANALYTICS.deviceEntry, devStr);
     if (beacon && navigator.sendBeacon) { try { if (navigator.sendBeacon(ANALYTICS.action, fd)) return; } catch (e) {} }
