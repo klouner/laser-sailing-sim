@@ -327,6 +327,37 @@ function foilMesh(shape, thickness, mat) {
   return m;
 }
 
+// ---------- кинематика рук ----------
+// Кисть не дальше вытянутой руки: подтягиваем цель к плечу
+function clampReach(shoulder, hand, reach) {
+  const d = hand.clone().sub(shoulder); const L = d.length();
+  if (L > reach) hand.copy(shoulder).addScaledVector(d, reach / L);
+  return hand;
+}
+// Точка на сфере радиуса r1 вокруг c1, не дальше r2 от c2, ближайшая к желаемой target
+function solveTwoSpheres(c1, r1, c2, r2, target) {
+  const d = c2.clone().sub(c1); const D = d.length(); const dh = d.clone().normalize();
+  if (D >= r1 + r2) return c1.clone().addScaledVector(dh, r1);           // недостижимо — тянемся как можем
+  let R = THREE.MathUtils.clamp(target.distanceTo(c2), 0.22, r2);
+  R = THREE.MathUtils.clamp(R, Math.abs(r1 - D) + 0.01, r1 + D - 0.01);
+  const a = (r1 * r1 - R * R + D * D) / (2 * D);
+  const hgt = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+  const center = c1.clone().addScaledVector(dh, a);
+  const off = target.clone().sub(center); off.addScaledVector(dh, -off.dot(dh));
+  if (off.lengthSq() < 1e-6) off.set(0, 1, 0).addScaledVector(dh, -dh.y);
+  return center.addScaledVector(off.normalize(), hgt);
+}
+// Локоть для двухзвенной руки; pole — направление сгиба
+function solveElbow(shoulder, hand, L1, L2, pole, out) {
+  const d = hand.clone().sub(shoulder); let D = d.length(); if (D < 1e-4) { out.copy(shoulder).add(new THREE.Vector3(0, -L1, 0)); return out; }
+  D = Math.min(D, L1 + L2 - 1e-3); const dh = d.normalize();
+  const a = (L1 * L1 - L2 * L2 + D * D) / (2 * D);
+  const hgt = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  const p = pole.clone().addScaledVector(dh, -pole.dot(dh)); if (p.lengthSq() < 1e-6) p.set(0, -1, 0).addScaledVector(dh, -dh.y * -1);
+  out.copy(shoulder).addScaledVector(dh, a).addScaledVector(p.normalize(), hgt);
+  return out;
+}
+
 // ---------- сборка лодки ----------
 export function createBoat() {
   const root = new THREE.Group();
@@ -646,8 +677,8 @@ export function createBoat() {
     visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2 + sv * 0.3 * h, 0);
     glasses.position.copy(P.headP).add(new THREE.Vector3(0.09, 0.01, 0));
     // плечи
-    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, sv * 0.01));
-    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, sv * 0.01));
+    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.16, -0.03, sv * 0.02));
+    const shB = P.shoulder.clone().add(new THREE.Vector3(0.16, -0.03, sv * 0.02));
     shoulderL.position.copy(shA); shoulderR.position.copy(shB);
     // ноги: бедро ~0.42 м к центру, стопы под ремнём у диаметральной плоскости; при откренивании ноги выпрямляются
     for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.11], [thighR, shinR, kneeR, footR, -0.11]]) {
@@ -662,22 +693,25 @@ export function createBoat() {
       knee.position.copy(P.knee);
       foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -sv * 0.02)); foot.rotation.set(0, sv * 0.35, 0);
     }
-    // руки: задняя — на конце румпель-удлинителя фиксированной длины, передняя — шкот
+    // руки: двухзвенная кинематика (плечо 0.30 м, предплечье 0.28 м), кисть не дальше вытянутой руки
+    const L1 = 0.30, L2 = 0.28, REACH = L1 + L2 - 0.02;
     const run = twa >= 150;
     const EXT_LEN = 1.05;
-    const handTarget = new THREE.Vector3(SS.x - 0.6, dy + 0.28 + 0.12 * h - 0.1 * crouch, sv * (0.3 + 0.25 * h) * (1 - crouch));
+    // задняя рука: удлинитель румпеля держится поперёк корпуса у бедра; конец удлинителя — на сфере EXT_LEN вокруг шарнира
     const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(new THREE.Vector3()));
-    const toHand = handTarget.clone().sub(pivotHull); if (toHand.length() < 0.05) toHand.set(1, 0.2, 0);
-    toHand.normalize();
-    P.handA.copy(pivotHull).addScaledVector(toHand, EXT_LEN);          // кисть — ровно на рукоятке удлинителя
+    const wantA = new THREE.Vector3(SS.x - 0.15, dy + 0.34 - 0.08 * crouch, lateral + sv * 0.12 * (1 - crouch));
+    P.handA.copy(solveTwoSpheres(pivotHull, EXT_LEN, shA, REACH, wantA));
+    // передняя рука: шкот; на фордевинде — участок шкота от блока к гику
     if (run) {
       const bm = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
-      P.handB.copy(blockTop).lerp(bm, 0.35);
+      P.handB.copy(blockTop).lerp(bm, 0.3);
     } else {
-      P.handB.set(SS.x + 0.4, dy + 0.38 - 0.1 * h - 0.1 * crouch, sv * (0.16 + 0.22 * h) * (1 - crouch));
+      P.handB.set(SS.x + 0.35, dy + 0.36 - 0.1 * h - 0.1 * crouch, lateral - sv * 0.05 + sv * 0.1 * h);
     }
-    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, sv * 0.14));
-    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, sv * 0.12));
+    clampReach(shB, P.handB, REACH);
+    // локти: задняя рука — вниз и наружу-назад, передняя — вниз
+    solveElbow(shA, P.handA, L1, L2, new THREE.Vector3(-0.4, -1, sv * 0.6), P.elbowA);
+    solveElbow(shB, P.handB, L1, L2, new THREE.Vector3(0.2, -1, sv * 0.3), P.elbowB);
     upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
     upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
     // удлинитель румпеля направлен в кисть, длина постоянная
