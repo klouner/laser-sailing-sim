@@ -624,17 +624,17 @@ export function createBoat() {
     SS.crouch += (cross - SS.crouch) * Math.min(1, dt * 6);
     const h = Math.min(1, Math.max(0, (SS.theta - 0.35) / 1.1));  // степень откренивания 0..1
     const dy = deckAt(SS.x);
-    const zAbs = SS.z * Math.abs(SS.side) + 0.05 * (1 - Math.abs(SS.side)); // при переходе — через центр
-    const lateral = sgn * zAbs;
+    const sv = SS.side;                                               // плавная сторона −1..1 (0 — в середине перехода)
+    const lateral = sv * SS.z + (1 - Math.abs(sv)) * 0.0;             // при переходе — через центр
     const crouch = SS.crouch;
     // таз
     P.hip.set(SS.x, dy + 0.06 - 0.12 * crouch, lateral);
     const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
     const lean = 0.25 * crouch;                                     // при переходе наклон вперёд
-    const dir = P.tmp.set(-0.06 + lean, Math.cos(theta), sgn * Math.sin(theta)).normalize();
+    const dir = P.tmp.set(-0.06 + lean, Math.cos(theta), sv * Math.sin(theta)).normalize();
     const chestC = P.hip.clone().addScaledVector(dir, 0.34);
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.5);
-    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, -0.06 * crouch, -sgn * 0.04));
+    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, -0.06 * crouch, -sv * 0.04));
     const q = new THREE.Quaternion().setFromUnitVectors(Y, dir);
     pelvis.position.copy(P.hip); pelvis.quaternion.copy(q);
     abdomen.position.copy(P.hip).addScaledVector(dir, 0.15); abdomen.quaternion.copy(q);
@@ -642,45 +642,50 @@ export function createBoat() {
     vestBand.position.copy(P.hip).addScaledVector(dir, 0.27); vestBand.quaternion.copy(q); vestBand.rotateX(Math.PI / 2);
     neck.position.copy(P.shoulder).addScaledVector(dir, 0.06); neck.quaternion.copy(q);
     headM.position.copy(P.headP);
-    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -sgn * 0.15 * h);
-    // взгляд: вперёд, при откренивании — вверх на парус
-    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2 + sgn * 0.3 * h, 0);
+    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -sv * 0.15 * h);
+    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2 + sv * 0.3 * h, 0);
     glasses.position.copy(P.headP).add(new THREE.Vector3(0.09, 0.01, 0));
     // плечи
-    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, sgn * 0.01));
-    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, sgn * 0.01));
+    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.17, -0.02, sv * 0.01));
+    const shB = P.shoulder.clone().add(new THREE.Vector3(0.17, -0.02, sv * 0.01));
     shoulderL.position.copy(shA); shoulderR.position.copy(shB);
-    // ноги: при откренивании прямые, колени у кромки борта, стопы под ремнём; сидя — согнуты
+    // ноги: бедро ~0.42 м к центру, стопы под ремнём у диаметральной плоскости; при откренивании ноги выпрямляются
     for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.11], [thighR, shinR, kneeR, footR, -0.11]]) {
-      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -sgn * 0.06));
-      const kneeZ = sgn * (0.30 - 0.22 * h) * (1 - crouch) + sgn * 0.12 * crouch;
-      const kneeY = dy + (0.16 - 0.12 * h) * (1 - crouch) + 0.02 * crouch;
-      P.knee.set(SS.x + off * 0.9 + 0.04 * h, kneeY, kneeZ + off * 0.3);
-      P.foot.set(SS.x + 0.05 + off * 0.9, floorY + 0.05, -sgn * 0.03 * (1 - crouch) + off * 0.5);
+      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -sv * 0.06));
+      const kneeIn = 0.40;                                             // бедро направлено к центру лодки
+      const kneeZ = lateral - sv * kneeIn * (1 - crouch) + off * 0.3;
+      const kneeY = dy + (0.18 - 0.14 * h) * (1 - crouch) + 0.02 * crouch;
+      P.knee.set(SS.x + off * 0.9 + 0.04 * h, kneeY, kneeZ);
+      const footZ = THREE.MathUtils.clamp(lateral - sv * 0.85, -0.2, 0.2) + off * 0.45;
+      P.foot.set(SS.x + 0.08 + off * 0.9, floorY + 0.05, footZ);
       thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, P.foot);
       knee.position.copy(P.knee);
-      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -sgn * 0.02)); foot.rotation.set(0, sgn * 0.35, 0);
+      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -sv * 0.02)); foot.rotation.set(0, sv * 0.35, 0);
     }
-    // руки: задняя — румпель-удлинитель (поперёк корпуса), передняя — шкот
+    // руки: задняя — на конце румпель-удлинителя фиксированной длины, передняя — шкот
     const run = twa >= 150;
-    P.handA.set(SS.x - 0.6, dy + 0.28 + 0.12 * h - 0.1 * crouch, sgn * (0.3 + 0.25 * h) * (1 - crouch));
+    const EXT_LEN = 1.05;
+    const handTarget = new THREE.Vector3(SS.x - 0.6, dy + 0.28 + 0.12 * h - 0.1 * crouch, sv * (0.3 + 0.25 * h) * (1 - crouch));
+    const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(new THREE.Vector3()));
+    const toHand = handTarget.clone().sub(pivotHull); if (toHand.length() < 0.05) toHand.set(1, 0.2, 0);
+    toHand.normalize();
+    P.handA.copy(pivotHull).addScaledVector(toHand, EXT_LEN);          // кисть — ровно на рукоятке удлинителя
     if (run) {
-      // на фордевинде шкот держат ближе к гику: рука на участке шкота от блока к гику
       const bm = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
       P.handB.copy(blockTop).lerp(bm, 0.35);
     } else {
-      P.handB.set(SS.x + 0.4, dy + 0.38 - 0.1 * h - 0.1 * crouch, sgn * (0.16 + 0.22 * h) * (1 - crouch));
+      P.handB.set(SS.x + 0.4, dy + 0.38 - 0.1 * h - 0.1 * crouch, sv * (0.16 + 0.22 * h) * (1 - crouch));
     }
-    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, sgn * 0.14));
-    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, sgn * 0.12));
+    P.elbowA.copy(shA).lerp(P.handA, 0.5).add(new THREE.Vector3(-0.02, -0.1, sv * 0.14));
+    P.elbowB.copy(shB).lerp(P.handB, 0.5).add(new THREE.Vector3(0.06, -0.12, sv * 0.12));
     upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
     upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
-    // удлинитель румпеля — в заднюю руку
+    // удлинитель румпеля направлен в кисть, длина постоянная
     const local = rudderPivot.worldToLocal(heelG.localToWorld(P.handA.clone()));
     const d = local.sub(extPivot.position);
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
-    const extLen = THREE.MathUtils.clamp(d.length(), 0.5, 1.3);
-    extension.scale.y = extLen / 1.1; extension.position.x = extLen / 2; extGrip.position.x = extLen - 0.1;
+    extension.scale.y = EXT_LEN / 1.1; extension.position.x = EXT_LEN / 2; extGrip.position.x = EXT_LEN - 0.1;
+
     // шкот от блока в переднюю руку
     const handPt = P.handB.clone().add(new THREE.Vector3(0, -0.03, 0));
     const midY = (blockTop.y + handPt.y) / 2;
