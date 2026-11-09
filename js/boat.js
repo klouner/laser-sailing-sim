@@ -691,8 +691,8 @@ export function createBoat() {
     heelG.rotation.z = (Math.sin(t * 0.9) * 0.8 - Math.min(2.5, state.vf * 0.9)) * DEG;
     heelG.position.y = bob;
 
-    rig.rotation.y = -state.boom * DEG;
-    windex.rotation.y = -out.AWA * DEG - rig.rotation.y;
+    rig.rotation.y = state.boom * DEG; // boom>0 → гик по правому борту (+z): локальная −x при повороте на +θ уходит в +z
+    windex.rotation.y = -out.AWA * DEG - rig.rotation.y; // указывает, откуда вымпельный ветер (в системе корпуса)
     updateSail(out, dt, state);
 
     // гика-шкот: блок на погоне → блок на ноке гика → обратно на погон (тали 2:1) → вдоль гика к среднему блоку → блок в кокпите

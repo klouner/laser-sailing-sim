@@ -185,7 +185,7 @@ export function step(state, ctl, dt) {
     // крен: кренящий момент против восстанавливающего (корпус + матрос)
     const righting = 1 + 1.25 * state.hike;                 // откренивание экипажа усиливает остойчивость
     const heelMag = Math.min(80, Math.abs(Fs) * 0.11 / righting);
-    const heelTarget = -side * heelMag + (-state.yawRate * 0.15); // центробежный крен при повороте
+    const heelTarget = side * heelMag + state.yawRate * 0.15; // крен под ветер (+ = на левый борт при ветре справа); центробежный — наружу поворота
     state.heel += (heelTarget - state.heel) * Math.min(1, dt * 1.6);
     if (Math.abs(state.heel) > 58) state.capsized = 0.01;
 
@@ -198,9 +198,9 @@ export function step(state, ctl, dt) {
     // оверкиль: лодка лежит на борту, останавливается, через 4 с матрос ставит её на ровный киль
     state.capsized += dt;
     state.vf *= Math.max(0, 1 - dt * 2); state.vs *= Math.max(0, 1 - dt * 2);
-    state.heel += (-side * 82 - state.heel) * Math.min(1, dt * 2);
+    state.heel += (side * 82 - state.heel) * Math.min(1, dt * 2);
     state.boom += (boomTarget - state.boom) * Math.min(1, dt * 5);
-    if (state.capsized > 4) { state.capsized = 0; state.heel = -side * 10; state.heading = norm360(windFrom + side * 70); state.hike = 0; }
+    if (state.capsized > 4) { state.capsized = 0; state.heel = side * 10; state.heading = norm360(windFrom + side * 70); state.hike = 0; }
     state.time += dt;
   }
 
