@@ -461,7 +461,11 @@ function updateUI(out, dt) {
 
   $('pos-name').textContent = out.pos.name;
   $('tack-name').textContent = `${out.tack} · ${out.pos.desc} · ${Math.round(out.twaAbs)}° к ветру`;
-  const hint = $('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
+  // подсказка меняется не чаще, чем раз в 0.6 с, чтобы не мигала при быстрых действиях
+  if (out.hint !== updateUI.pendingHint) { updateUI.pendingHint = out.hint; updateUI.pendingSince = performance.now(); }
+  if (out.hint !== updateUI.shownHint && performance.now() - updateUI.pendingSince > 600) {
+    updateUI.shownHint = out.hint; const hint = $('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
+  }
 
   $('s-speed').textContent = `${fmt(out.speedKn)} уз`;
   $('speed-big').textContent = fmt(out.speedKn);
