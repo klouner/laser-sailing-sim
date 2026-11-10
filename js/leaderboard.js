@@ -1,10 +1,12 @@
-// Таблица лидеров: localStorage по умолчанию; общий вариант — свой сервер (server/) либо публичный JSON-блоб (jsonblob.com)
-import { LEADERBOARD_URL, GFORM } from './config.js';
+// Таблица лидеров: общая на своём сервере (API в js/config.js); если сервер недоступен — в памяти браузера.
+// Запасные варианты: Google Форма с Таблицей или публичный JSON-блоб.
+import { API, LEADERBOARD_URL, GFORM } from './config.js';
+import { VID, SID } from './analytics.js';
 
 const KEY = 'laser3d.leaderboard.v3', NAME_KEY = 'laser3d.name';
 const sortTrim = (list, n = 10) => (Array.isArray(list) ? list : []).filter(e => e && typeof e.time === 'number' && e.time > 20 && e.time < 3600).sort((a, b) => a.time - b.time).slice(0, n);
 const isBlob = /jsonblob\.com\/api\/jsonBlob\//.test(LEADERBOARD_URL);
-export const isShared = !!LEADERBOARD_URL || !!GFORM;
+export const isShared = !!API || !!LEADERBOARD_URL || !!GFORM;
 
 // ---- Google Форма + Таблица ----
 function parseCSV(text) {
@@ -68,7 +70,21 @@ function localAdd(entry) {
   return list;
 }
 
+// ---- свой сервер ----
+async function apiGet() {
+  const r = await fetch(`${API.base}${API.top}?ver=${API.ver}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error('top ' + r.status);
+  return sortTrim(await r.json());
+}
+async function apiSubmit(entry) {
+  // тело уходит как text/plain: такой запрос браузер отправляет без предварительного OPTIONS
+  const r = await fetch(API.base + API.submit, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ name: entry.name, time: entry.time, ver: API.ver, vid: VID, sid: SID }) });
+  if (!r.ok) throw new Error('submit ' + r.status);
+  return sortTrim(await r.json());
+}
+
 export async function loadTop() {
+  if (API) { try { return await apiGet(); } catch (e) { return localGet(); } }
   if (GFORM) { try { return (await gformGet()).slice(0, 10); } catch (e) { /* локально */ } }
   if (LEADERBOARD_URL) {
     try {
@@ -81,6 +97,7 @@ export async function loadTop() {
 export function isRecord(top, time) { return top.length < 10 || time < top[top.length - 1].time; }
 export async function submit(name, time) {
   const entry = { name: String(name).slice(0, 18) || 'Без имени', time: Math.round(time * 10) / 10, date: new Date().toISOString().slice(0, 10) };
+  if (API) { try { return await apiSubmit(entry); } catch (e) { return localAdd(entry); } }
   if (GFORM) { try { const r = await gformSubmit(entry); if (r) return r; } catch (e) { /* локально */ } }
   if (LEADERBOARD_URL) {
     try {

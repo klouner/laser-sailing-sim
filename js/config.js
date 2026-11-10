@@ -1,31 +1,17 @@
-// ---------- Общая таблица лидеров ----------
-// Вариант 1 (рекомендуется без сервера): Google Форма + Google Таблица.
-//   action    — адрес отправки формы: https://docs.google.com/forms/d/e/<ID>/formResponse
-//   nameEntry — поле «Имя»  (entry.XXXXXXX из предзаполненной ссылки)
-//   timeEntry — поле «Время» (entry.XXXXXXX)
-//   csv       — публичная таблица ответов: https://docs.google.com/spreadsheets/d/<ID>/gviz/tq?tqx=out:csv
-export const GFORM = {
-  action: 'https://docs.google.com/forms/d/e/1FAIpQLScYABMja1ZbrU0EznE1RqnTLxrYrnGF2uB9AdTCG26LMN9ssw/formResponse',
-  nameEntry: 'entry.311551524', timeEntry: 'entry.1272343547',
-  csv: 'https://docs.google.com/spreadsheets/d/1rG1V4bnVmH27LLwUzGqzRdwVee7Z0Wjexl0YHUX9P38/gviz/tq?tqx=out:csv',
-};
-// пример:
-// export const GFORM = {
-//   action: 'https://docs.google.com/forms/d/e/1FAIpQL.../formResponse',
-//   nameEntry: 'entry.1234567890', timeEntry: 'entry.987654321',
-//   csv: 'https://docs.google.com/spreadsheets/d/1AbC.../gviz/tq?tqx=out:csv',
-// };
+// ---------- Свой сервер: статистика посещений и общая таблица рекордов ----------
+// Сервис на VDS, контракт описан в server/STATS_SERVER.md.
+//   base   — адрес без слэша в конце
+//   event  — POST: событие статистики
+//   top    — GET ?ver=N: десять лучших результатов гонки
+//   submit — POST: записать результат
+//   ver    — версия физики лодки: после изменения модели старые результаты несравнимы и в таблицу не попадают
+// При разработке на своей машине сервер не используется: ничего не пишется, рекорды хранятся в браузере.
+// Параметр ?api=1 в адресе включает сервер и там.
+const LOCAL = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|)$/.test(location.hostname) && !/[?&]api=1/.test(location.search);
+export const API = LOCAL ? null : { base: 'https://sh38.ru/laser-api', event: '/event', top: '/top', submit: '/submit', ver: 3 };
 
-// Вариант 2: свой сервер (server/) или Cloudflare Worker (worker/) — адрес по HTTPS
-// или публичный блоб jsonblob.com (https://jsonblob.com/api/jsonBlob/<id>)
+// ---------- Запасные варианты таблицы рекордов (используются, только если API = null) ----------
+// Google Форма + Таблица: { action, nameEntry, timeEntry, csv }
+export const GFORM = null;
+// Публичный блоб jsonblob.com (https://jsonblob.com/api/jsonBlob/<id>) или сервер с путями /top и /submit
 export const LEADERBOARD_URL = '';
-
-// ---------- Статистика посещений ----------
-// Отдельная Google Форма с тремя короткими полями: «Событие», «Длительность», «Устройство».
-// action — https://docs.google.com/forms/d/e/<ID>/formResponse; entry.* — из предзаполненной ссылки.
-// Пока null — ничего не отправляется.
-// { useLeaderboardForm: true } — писать события в форму рекордов: «Имя» = «#событие · устройство», «Время» = секунды
-export const ANALYTICS = { useLeaderboardForm: true };
-// пример:
-// export const ANALYTICS = { action: 'https://docs.google.com/forms/d/e/1FAIpQL.../formResponse',
-//   eventEntry: 'entry.111', durationEntry: 'entry.222', deviceEntry: 'entry.333' };

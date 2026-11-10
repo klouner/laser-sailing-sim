@@ -47,6 +47,8 @@ renderer.shadowMap.type = !isTouch && level !== 'low' ? THREE.PCFSoftShadowMap :
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// статистика: что сейчас на экране, читается раз в 30 секунд
+const stats = initAnalytics({ gl: renderer.getContext(), state: () => ({ fps: Math.round(perf.fps), quality: level, mode: mode === 'lesson' && lessons.run.lesson ? 'lesson:' + lessons.run.lesson.id : mode, cam: camMode }) });
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(HAZE, 180, 1500);
@@ -444,7 +446,7 @@ function askName(time) {
 }
 let wasCapsized = false;
 function updateTraining(out, dt, t) {
-  if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
+  if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; stats.track('lesson', { id: lessons.run.lesson.id, result: 'failed', why: 'capsize' }); lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
   wasCapsized = !!out.capsized;
   if (mode === 'race') {
     const r = course.race;
@@ -470,6 +472,7 @@ function updateTraining(out, dt, t) {
       tb.note.textContent = rec ? 'Финиш! Это результат уровня топ-10.' : `Финиш! До топ-10 не хватило ${fmtTime(r.result - top[top.length - 1].time)}.`;
       tb.next.hidden = false; tb.next.textContent = 'Ещё раз';
       toast('ФИНИШ ' + fmtTime(r.result), true, 2500);
+      stats.track('race', { time: Math.round(r.result * 10) / 10 });
       if (rec) setTimeout(() => askName(r.result), 1500);
     }
   } else if (mode === 'lesson') {
@@ -480,12 +483,13 @@ function updateTraining(out, dt, t) {
       tb.bar.classList.add('done'); tb.fill.style.width = '100%'; tb.note.textContent = '✓ Урок пройден'; tb.next.hidden = false;
       tb.next.textContent = run.index + 1 < LESSONS.length ? 'Дальше →' : 'К гонке →';
       passed.add(run.lesson.id); savePassed(); renderLessonList(); toast('Урок пройден', true, 1600);
+      stats.track('lesson', { id: run.lesson.id, result: 'done', sec: Math.round(run.el) });
     }
-    if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; }
+    if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; stats.track('lesson', { id: run.lesson.id, result: 'failed', sec: Math.round(run.el) }); }
   }
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, get camT() { return camTargetOffset; }, boat, audio, get look() { return look; }, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { get level() { return level; }, prefs, stats, camera, controls, setCamera, get camT() { return camTargetOffset; }, boat, audio, get look() { return look; }, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -789,4 +793,3 @@ function frame() {
 showQuality(); showFps();
 frame();
 requestAnimationFrame(() => $('loading').classList.add('hide'));
-initAnalytics();
