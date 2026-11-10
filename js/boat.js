@@ -44,6 +44,7 @@ function sectionPoint(st, t) {
   return new THREE.Vector3(st.x, y, z);
 }
 
+const DECK_CROWN = 0.03;      // погибь палубы в корме и у кокпита, м
 function buildHullGeometry() {
   const NX = 84, NT = 36;
   const pos = [], idx = [], uv = [];
@@ -63,10 +64,12 @@ function buildHullGeometry() {
   const st0 = stationAt(0);
   const ring0 = pos.length / 3;
   for (let j = 0; j <= NT; j++) { pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]); uv.push(0, j / NT); }
-  const center = pos.length / 3;
+  // верхняя кромка транца идёт по погиби палубы, от правого борта к левому: между транцем и палубой нет щели
+  const NC = 12;
+  for (let q = 1; q < NC; q++) { const t = 1 - 2 * q / NC; pos.push(st0.x, st0.sheer + DECK_CROWN * (1 - t * t), st0.hw * t); uv.push(0, 0.5); }
+  const center = pos.length / 3, nRing = NT + NC;
   pos.push(st0.x, (st0.sheer + st0.keel) / 2, 0); uv.push(0, 0.5);
-  for (let j = 0; j < NT; j++) idx.push(center, ring0 + j, ring0 + j + 1);
-  idx.push(center, ring0 + NT, ring0);         // верх транца под палубой
+  for (let j = 0; j < nRing; j++) idx.push(center, ring0 + j, ring0 + (j + 1) % nRing);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -101,7 +104,7 @@ function buildDeckGeometry() {
       const t = -1 + 2 * j / NZ;
       const z = st.hw * t * 0.998;
       // палуба: небольшая погибь, в носу выше (горб у степса)
-      const crown = 0.03 + 0.03 * THREE.MathUtils.smoothstep(st.x, 0.5, 1.6);
+      const crown = DECK_CROWN + 0.03 * THREE.MathUtils.smoothstep(st.x, 0.5, 1.6);
       let y = st.sheer + crown * (1 - t * t);
       let c = cDeck;
       const d = cockpitSDF(st.x, z);
@@ -134,8 +137,11 @@ function sheerCurve() {
   const pts = [];
   const N = 70;
   for (let i = 0; i <= N; i++) { const st = stationAt(i / N); pts.push(new THREE.Vector3(st.x, st.sheer + 0.012, st.hw)); }
-  for (let i = N - 1; i >= 1; i--) { const st = stationAt(i / N); pts.push(new THREE.Vector3(st.x, st.sheer + 0.012, -st.hw)); }
-  return new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
+  for (let i = N - 1; i >= 0; i--) { const st = stationAt(i / N); pts.push(new THREE.Vector3(st.x, st.sheer + 0.012, -st.hw)); }
+  // по корме брус идёт вдоль кромки палубы с её погибью; точки у углов стоят часто, чтобы угол не срезало
+  const s0 = stationAt(0);
+  for (const t of [-0.97, -0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9, 0.97]) pts.push(new THREE.Vector3(s0.x, s0.sheer + 0.012 + DECK_CROWN * (1 - t * t), s0.hw * t));
+  return new THREE.CatmullRomCurve3(pts, true, 'centripetal');
 }
 
 // ---------- текстуры ----------

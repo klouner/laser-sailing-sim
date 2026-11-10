@@ -478,7 +478,7 @@ function updateTraining(out, dt, t) {
   }
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, boat, audio, get look() { return look; }, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, get camT() { return camTargetOffset; }, boat, audio, get look() { return look; }, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
