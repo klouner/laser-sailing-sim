@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import { WAVE_GLSL, GUST_GLSL, floatOnWaves } from './env.js';
 
 const DEG = Math.PI / 180;
+// детерминированный генератор для процедурных текстур
+function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 // ---------- небо ----------
 export function makeSky() {
@@ -14,28 +17,43 @@ export function makeSky() {
         vec3 c = h < 0.15 ? mix(bot, mid, smoothstep(-0.1,0.15,h)) : mix(mid, top, smoothstep(0.15,0.9,h));
         float s = max(dot(normalize(vDir), sun), 0.0);
         c += vec3(1.0,0.95,0.8) * pow(s, 400.0) * 1.5 + vec3(1.0,0.9,0.7) * pow(s, 12.0) * 0.25;
+        // лёгкий шум против полос на плавном градиенте
+        c += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 160.0;
         gl_FragColor = vec4(c, 1.0); }`
   });
   return new THREE.Mesh(geo, mat);
 }
 
 // ---------- облака ----------
-export function makeClouds() {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
-  const g = c.getContext('2d');
-  for (let i = 0; i < 14; i++) {
-    const x = 40 + Math.random() * 176, y = 50 + Math.random() * 40, r = 22 + Math.random() * 28;
-    const grd = g.createRadialGradient(x, y, 0, x, y, r);
-    grd.addColorStop(0, 'rgba(255,255,255,0.85)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grd; g.fillRect(0, 0, 256, 128);
+// Текстура собирается попиксельно: чисто белый цвет и плавная прозрачность.
+// (Градиенты холста на части телефонов дают цветную рябь.)
+function makeCloudTexture(seed) {
+  const W = 256, H = 128, rnd = rng(seed);
+  const acc = new Float32Array(W * H);
+  for (let b = 0; b < 16; b++) {
+    const cx = 44 + rnd() * 168, cy = 46 + rnd() * 40, r = 20 + rnd() * 30, gain = 0.55 + rnd() * 0.4;
+    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(W - 1, Math.ceil(cx + r)), y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(H - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const d = Math.hypot(x - cx, y - cy) / r; if (d >= 1) continue;
+      const f = 1 - d * d; acc[y * W + x] += gain * f * f;
+    }
   }
-  const tex = new THREE.CanvasTexture(c);
+  const data = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) { data[i * 4] = 255; data[i * 4 + 1] = 255; data[i * 4 + 2] = 255; data[i * 4 + 3] = Math.round(255 * Math.min(0.92, acc[i]) ); }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true;
+  tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+  return tex;
+}
+export function makeClouds() {
+  const texs = [makeCloudTexture(11), makeCloudTexture(47), makeCloudTexture(93)];
+  const rnd = rng(7);
   const group = new THREE.Group();
-  for (let i = 0; i < 26; i++) {
-    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.55 + Math.random() * 0.35, depthWrite: false }));
-    const a = Math.random() * Math.PI * 2, r = 150 + Math.random() * 450;
-    m.position.set(Math.cos(a) * r, 60 + Math.random() * 70, Math.sin(a) * r);
-    const s = 90 + Math.random() * 160; m.scale.set(s, s * 0.45, 1);
+  for (let i = 0; i < 18; i++) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: texs[i % 3], transparent: true, opacity: 0.55 + rnd() * 0.35, depthWrite: false }));
+    const a = rnd() * Math.PI * 2, r = 150 + rnd() * 450;
+    m.position.set(Math.cos(a) * r, 60 + rnd() * 70, Math.sin(a) * r);
+    const s = 90 + rnd() * 160; m.scale.set(s, s * 0.45, 1);
     group.add(m);
   }
   return group;
@@ -43,58 +61,98 @@ export function makeClouds() {
 
 // ---------- вода ----------
 function makeWaterNormalMap() {
-  const N = 256;
+  const N = 256, rnd = rng(3);
   const h = new Float32Array(N * N);
   const waves = [];
-  for (let k = 0; k < 7; k++) waves.push({ a: Math.random() * Math.PI * 2, f: 2 + Math.random() * 9, p: Math.random() * 6, amp: 1 / (k + 1.5) });
+  for (let k = 0; k < 7; k++) waves.push({ a: rnd() * Math.PI * 2, f: Math.round(2 + rnd() * 9), p: rnd() * 6, amp: 1 / (k + 1.5) });
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     let v = 0; const x = i / N, y = j / N;
-    for (const w of waves) v += w.amp * Math.sin((Math.cos(w.a) * x + Math.sin(w.a) * y) * w.f * Math.PI * 2 + w.p);
+    for (const w of waves) v += w.amp * Math.sin((Math.round(Math.cos(w.a) * w.f) * x + Math.round(Math.sin(w.a) * w.f) * y) * Math.PI * 2 + w.p);
     h[j * N + i] = v;
   }
-  const c = document.createElement('canvas'); c.width = N; c.height = N;
-  const g = c.getContext('2d'); const img = g.createImageData(N, N);
+  const data = new Uint8Array(N * N * 4);
   const str = 0.18;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const l = h[j * N + (i + N - 1) % N], r = h[j * N + (i + 1) % N], u = h[((j + N - 1) % N) * N + i], d = h[((j + 1) % N) * N + i];
     const nx = -(r - l) * str, ny = -(d - u) * str, nz = 1;
     const len = Math.hypot(nx, ny, nz); const k = (j * N + i) * 4;
-    img.data[k] = (nx / len * 0.5 + 0.5) * 255; img.data[k + 1] = (ny / len * 0.5 + 0.5) * 255; img.data[k + 2] = (nz / len * 0.5 + 0.5) * 255; img.data[k + 3] = 255;
+    data[k] = (nx / len * 0.5 + 0.5) * 255; data[k + 1] = (ny / len * 0.5 + 0.5) * 255; data[k + 2] = (nz / len * 0.5 + 0.5) * 255; data[k + 3] = 255;
   }
-  g.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
   return tex;
 }
+// Сетка воды: густая у лодки (ячейка ~0.4 м), редкая вдали. Вдвое меньше треугольников, чем у равномерной.
+function buildWaterGeometry(R, N, a) {
+  const map = (u) => R * (a * u + (1 - a) * u * u * u);
+  const n1 = N + 1, pos = new Float32Array(n1 * n1 * 3), nor = new Float32Array(n1 * n1 * 3), uv = new Float32Array(n1 * n1 * 2);
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const x = map(-1 + 2 * i / N), z = map(-1 + 2 * j / N), k = j * n1 + i;
+    pos[k * 3] = x; pos[k * 3 + 2] = z; nor[k * 3 + 1] = 1;
+    uv[k * 2] = x / (2 * R) + 0.5; uv[k * 2 + 1] = -z / (2 * R) + 0.5;
+  }
+  const idx = new Uint16Array(N * N * 6); let o = 0;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const p = j * n1 + i, q = p + 1, r = p + n1, s = r + 1;
+    idx[o++] = p; idx[o++] = r; idx[o++] = q; idx[o++] = q; idx[o++] = r; idx[o++] = s;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), R * 1.5);
+  return g;
+}
 
-export function makeWater() {
-  const SIZE = 600, REPEAT = 90;
-  const geo = new THREE.PlaneGeometry(SIZE, SIZE, 180, 180);
-  geo.rotateX(-Math.PI / 2);
+export function makeWater(env) {
+  const R = 300, SIZE = 2 * R, REPEAT = 90;
+  const geo = buildWaterGeometry(R, 128, 0.08);
   const nmap = makeWaterNormalMap();
   nmap.repeat.set(REPEAT, REPEAT);
   const mat = new THREE.MeshStandardMaterial({
-    color: '#1b5e8f', roughness: 0.28, metalness: 0.05, normalMap: nmap, normalScale: new THREE.Vector2(0.55, 0.55),
+    color: '#1b5e8f', roughness: 0.26, metalness: 0.05, normalMap: nmap, normalScale: new THREE.Vector2(0.55, 0.55),
     transparent: true, opacity: 0.94,
   });
-  mat.userData.uTime = { value: 0 };
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uTime = mat.userData.uTime;
+    Object.assign(sh.uniforms, env.uniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <common>', '#include <common>\n' + WAVE_GLSL + GUST_GLSL + '\nvarying float vWave; varying float vGust; varying vec2 vWXZ;')
+      .replace('#include <beginnormal_vertex>', `
+        vec3 wp0 = (modelMatrix * vec4(position, 1.0)).xyz;
+        vec3 whg = waveHG(wp0.xz);
+        vec3 objectNormal = normalize(vec3(-whg.y, 1.0, -whg.z));
+        #ifdef USE_TANGENT
+          vec3 objectTangent = vec3(tangent.xyz);
+        #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vec3 wp = (modelMatrix * vec4(position,1.0)).xyz;
-        float wv = 0.0;
-        wv += 0.045 * sin(dot(wp.xz, vec2(0.9, 0.35)) * 0.9 + uTime * 1.4);
-        wv += 0.03 * sin(dot(wp.xz, vec2(-0.5, 0.8)) * 1.7 + uTime * 2.1);
-        wv += 0.02 * sin(dot(wp.xz, vec2(0.3, -0.95)) * 3.1 + uTime * 2.9);
-        transformed.y += wv;`);
+        transformed.y += whg.x; vWave = whg.x / uAmpTotal; vGust = gustV(wp0.xz); vWXZ = wp0.xz;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uGustOn; uniform float uWhitecap; varying float vWave; varying float vGust; varying vec2 vWXZ;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // порыв (>0) — пятно тёмной ряби с заметной границей; затишье (<0) — светлее и глаже
+        float gP = smoothstep(0.12, 0.55, vGust) * uGustOn, gL = smoothstep(0.15, 0.6, -vGust) * uGustOn;
+        float gE = gP - gL;
+        // барашки: мелкие пятна пены на вершинах гребней
+        // три слоя шума под разными углами и в разном масштабе, чтобы пятна пены не выстраивались в полосы
+        vec2 q1 = vec2(vWXZ.x * 0.82 + vWXZ.y * 0.57, vWXZ.y * 0.82 - vWXZ.x * 0.57), q2 = vec2(vWXZ.x * 0.34 - vWXZ.y * 0.94, vWXZ.y * 0.34 + vWXZ.x * 0.94);
+        float nA = texture2D(normalMap, q1 * 0.23).r, nB = texture2D(normalMap, q2 * 0.11 + 0.37).g, nC = texture2D(normalMap, vWXZ.yx * 0.47 + 0.11).g;
+        float crest = smoothstep(0.25, 0.75, vWave);
+        float nz = (nA - 0.5) * 0.48 + (nB - 0.5) * 0.40 + (nC - 0.5) * 0.12;      // шум около нуля, размах ~±0.08
+        float foamE = min(1.0, uWhitecap * 3.0) * smoothstep(0.90, 1.18, crest + nz * 6.0 - (1.0 - uWhitecap) * 0.55);
+        diffuseColor.rgb *= 1.0 - 0.36 * gP;
+        diffuseColor.rgb *= 1.0 + 0.14 * gL;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.96, 0.98), foamE);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = clamp(roughnessFactor + 0.30 * gP - 0.10 * gL + 0.6 * foamE, 0.04, 1.0);`)
+      // вода в основном отражает небо, поэтому пятно порыва затемняем уже после расчёта света
+      // солнечная дорожка: с настоящими уклонами волн блик стал широким — ограничиваем, чтобы не выгорал в белое
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        reflectedLight.directSpecular = min(reflectedLight.directSpecular * 0.35, vec3(0.55));`)
+      .replace('#include <opaque_fragment>', `outgoingLight *= (1.0 - 0.30 * gP * (1.0 - foamE)) * (1.0 + 0.10 * gL);
+        #include <opaque_fragment>`);
   };
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  mesh.userData.SIZE = SIZE; mesh.userData.REPEAT = REPEAT;
+  mesh.receiveShadow = true; mesh.frustumCulled = false;
   mesh.userData.update = (t, bx, bz, windDir) => {
-    mat.userData.uTime.value = t;
     mesh.position.set(bx, 0, bz);
     const wx = Math.sin(windDir), wz = -Math.cos(windDir);
     nmap.offset.set(bx / SIZE * REPEAT + wx * t * 0.045, -bz / SIZE * REPEAT - wz * t * 0.045);
@@ -128,44 +186,43 @@ export function setLabelScale(obj, k) {
 }
 
 // ---------- компасное кольцо на воде ----------
-export function makeCompassRing() {
+// Все плоские элементы лежат на волнах: геометрия в плоскости XZ, вершины поднимаются по той же формуле, что и вода.
+const flatMat = (color, opacity, env, lift) => floatOnWaves(new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false }), env, lift);
+export function makeCompassRing(env) {
   const g = new THREE.Group();
-  g.position.y = 0.16;
-  const R = 3.6;
-  const ring = new THREE.Mesh(new THREE.RingGeometry(R - 0.12, R, 128), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
-  ring.rotation.x = -Math.PI / 2; g.add(ring);
-  // риски каждые 30°
+  const R = 3.6, LIFT = 0.07;
+  const ringGeo = new THREE.RingGeometry(R - 0.12, R, 160); ringGeo.rotateX(-Math.PI / 2);
+  g.add(new THREE.Mesh(ringGeo, flatMat('#ffffff', 0.6, env, LIFT)));
+  // риски каждые 10°
   const tickPts = [];
   for (let b = 0; b < 360; b += 10) {
     const a = (90 - b) * DEG, len = b % 90 === 0 ? 0.45 : b % 30 === 0 ? 0.3 : 0.15;
     tickPts.push(new THREE.Vector3(Math.cos(a) * (R - 0.12), 0, -Math.sin(a) * (R - 0.12)));
     tickPts.push(new THREE.Vector3(Math.cos(a) * (R - 0.12 - len), 0, -Math.sin(a) * (R - 0.12 - len)));
   }
-  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(tickPts), new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6 })));
+  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(tickPts), floatOnWaves(new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6 }), env, LIFT)));
   const names = [['С', 0], ['В', 90], ['Ю', 180], ['З', 270]];
+  const labels = [];
   for (const [n, b] of names) {
     const sp = makeTextSprite(n, { size: 56, bg: 'rgba(12,12,12,0.7)', scale: 0.45 });
     const a = (90 - b) * DEG;
-    sp.position.set(Math.cos(a) * (R + 0.45), 0.2, -Math.sin(a) * (R + 0.45));
-    g.add(sp);
+    sp.position.set(Math.cos(a) * (R + 0.45), 0.3, -Math.sin(a) * (R + 0.45));
+    g.add(sp); labels.push(sp);
   }
   // мёртвая зона — сектор ±42°
-  const wedge = new THREE.Mesh(new THREE.CircleGeometry(R - 0.15, 48, -42 * DEG, 84 * DEG), new THREE.MeshBasicMaterial({ color: '#ff3b30', transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
-  wedge.rotation.x = -Math.PI / 2;
+  const wedgeGeo = new THREE.RingGeometry(0.15, R - 0.15, 40, 10, -42 * DEG, 84 * DEG); wedgeGeo.rotateX(-Math.PI / 2);
+  const wedge = new THREE.Mesh(wedgeGeo, flatMat('#ff3b30', 0.22, env, LIFT - 0.01));
   const wedgeG = new THREE.Group(); wedgeG.add(wedge);
   const wedgeLabel = makeTextSprite('МЁРТВАЯ ЗОНА', { color: '#ffffff', size: 36, scale: 0.45 });
-  wedgeLabel.position.set(R * 0.7, 0.12, 0); wedgeG.add(wedgeLabel);
+  wedgeLabel.position.set(R * 0.7, 0.25, 0); wedgeG.add(wedgeLabel);
   g.add(wedgeG);
-  // стрелка ветра на кольце (куда дует)
+  // стрелка ветра на кольце (остриём к центру)
   const shape = new THREE.Shape();
   shape.moveTo(0, 0); shape.lineTo(-0.9, 0.5); shape.lineTo(-0.9, 0.18); shape.lineTo(-2.4, 0.18); shape.lineTo(-2.4, -0.18); shape.lineTo(-0.9, -0.18); shape.lineTo(-0.9, -0.5); shape.closePath();
-  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: '#0047ff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-  arrow.rotation.x = -Math.PI / 2;
-  const arrowG = new THREE.Group(); arrowG.add(arrow);
-  arrow.position.x = R + 0.25;
-  arrow.rotation.z = Math.PI; // остриё к центру
+  const arrowGeo = new THREE.ShapeGeometry(shape); arrowGeo.rotateZ(Math.PI); arrowGeo.rotateX(-Math.PI / 2); arrowGeo.translate(R + 0.25, 0, 0);
+  const arrowG = new THREE.Group(); arrowG.add(new THREE.Mesh(arrowGeo, flatMat('#0047ff', 0.9, env, LIFT + 0.08)));
   const windLabel = makeTextSprite('ВЕТЕР', { color: '#ffffff', bg: 'rgba(0,71,255,0.9)', size: 44, scale: 0.4 });
-  windLabel.position.set(R + 3.1, 0.2, 0); arrowG.add(windLabel);
+  windLabel.position.set(R + 3.1, 0.35, 0); arrowG.add(windLabel);
   g.add(arrowG);
 
   g.userData.update = (bx, bz, windFromDeg) => {
@@ -174,13 +231,14 @@ export function makeCompassRing() {
     const rot = Math.PI / 2 - windFromDeg * DEG;
     wedgeG.rotation.y = rot;
     arrowG.rotation.y = rot;
+    g.position.y = env.ampTotal * 0.5;      // подписи приподнимаются вместе с волнением
   };
   g.userData.setNoGo = (v) => { wedgeG.visible = v; };
   return g;
 }
 
 // ---------- объёмная стрелка вектора с подписью ----------
-const _unitY = new THREE.Vector3(0, 1, 0);
+const _unitY = new THREE.Vector3(0, 1, 0), _arrowDir = new THREE.Vector3();
 export class VectorArrow {
   constructor(scene, color, label) {
     this.color = color;
@@ -215,7 +273,7 @@ export class VectorArrow {
   }
   // from → to (мировые координаты)
   set(from, to, text, dt = 0, thickness = 1) {
-    const dir = to.clone().sub(from); const len = dir.length();
+    const dir = _arrowDir.copy(to).sub(from); const len = dir.length();
     if (len < 0.25 || !this.visible) { this.group.visible = false; this.label.visible = false; return; }
     this.group.visible = true; this.label.visible = this.showLabel;
     dir.normalize();
@@ -264,42 +322,96 @@ export function makeWindStreaks(count = 220) {
   return lines;
 }
 
-// ---------- кильватерный след ----------
-function foamTexture() {
-  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(64, 64, 4, 64, 64, 62);
-  grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.5, 'rgba(255,255,255,0.35)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
-  return new THREE.CanvasTexture(c);
-}
-export function makeWake(n = 64) {
-  const g = new THREE.Group();
-  const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
-  const foam = foamTexture();
-  const items = [];
-  for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#ffffff', map: foam, transparent: true, opacity: 0, depthWrite: false }));
-    m.position.y = 0.12; m.visible = false; g.add(m); items.push({ m, age: 99, size: 1 });
-  }
-  let acc = 0, k = 0;
-  g.userData.update = (dt, sternX, sternZ, speed, heading) => {
-    acc += dt;
-    if (speed > 0.6 && acc > 0.1) {
-      acc = 0; const it = items[k]; k = (k + 1) % n;
-      it.age = 0; it.size = 0.9 + speed * 0.3; it.m.visible = true;
-      it.m.position.x = sternX + (Math.random() - .5) * 0.3; it.m.position.z = sternZ + (Math.random() - .5) * 0.3;
-      it.m.rotation.y = -heading;
+// ---------- след на воде: кильватерная струя и усы от носа ----------
+function makeFoamTexture() {
+  // полупрозрачная пена: вытянутые вдоль хода струйки, между ними вода
+  const W = 256, H = 32, rnd = rng(21);
+  const acc = new Float32Array(W * H);
+  for (let i = 0; i < 150; i++) {
+    const bx = rnd() * W, by = 3 + rnd() * (H - 6), rx = 5 + rnd() * 22, ry = 0.9 + rnd() * 2.6, g = 0.35 + rnd() * 0.6;
+    for (let y = Math.max(0, Math.floor(by - ry)); y <= Math.min(H - 1, Math.ceil(by + ry)); y++) for (let q = Math.floor(bx - rx); q <= Math.ceil(bx + rx); q++) {
+      const x = ((q % W) + W) % W, d = Math.hypot((q - bx) / rx, (y - by) / ry); if (d < 1) acc[y * W + x] += g * (1 - d * d);
     }
-    for (const it of items) {
-      if (!it.m.visible) continue;
-      it.age += dt;
-      const life = 3.2;
-      if (it.age > life) { it.m.visible = false; continue; }
-      const f = it.age / life;
-      const s = it.size * (1 + f * 2.2);
-      it.m.scale.set(s, 1, s * 0.6);
-      it.m.material.opacity = 0.42 * (1 - f) * (1 - f);
+  }
+  const data = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const edge = Math.sin(Math.PI * (y + 0.5) / H);
+    const k = (y * W + x) * 4; data[k] = 255; data[k + 1] = 255; data[k + 2] = 255; data[k + 3] = Math.round(255 * Math.min(1, 0.07 + acc[y * W + x] * 0.8) * edge * edge);
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
+  return tex;
+}
+// Лента из точек следа: новые точки добавляются по мере хода, старые расплываются и гаснут
+class Ribbon {
+  constructor(n, material, { life, w0, w1, spacing }) {
+    this.n = n; this.life = life; this.w0 = w0; this.w1 = w1; this.spacing = spacing;
+    this.px = new Float32Array(n); this.pz = new Float32Array(n); this.vx = new Float32Array(n); this.vz = new Float32Array(n);
+    this.age = new Float32Array(n).fill(1e9); this.str = new Float32Array(n); this.u = new Float32Array(n);
+    this.head = 0; this.count = 0; this.dist = 0;
+    this.pos = new Float32Array(n * 2 * 3); this.uv = new Float32Array(n * 2 * 2); this.col = new Float32Array(n * 2 * 4).fill(1);
+    const idx = [];
+    for (let i = 0; i < n - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    const g = this.geo = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(this.uv, 2)); g.setAttribute('color', new THREE.BufferAttribute(this.col, 4));
+    g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, material); this.mesh.frustumCulled = false; this.mesh.renderOrder = 2;
+  }
+  idx(i) { return (this.head - 1 - i + this.n * 2) % this.n; }   // i = 0 — самая свежая точка
+  // источник следа в точке (x, z); точки расходятся со скоростью (vx, vz)
+  track(x, z, vx, vz, strength) {
+    // самая свежая точка «живая» и идёт вместе с источником; когда источник уходит от последней
+    // закреплённой точки дальше шага, живая закрепляется и начинает стареть, а за источником идёт новая
+    const push = () => {
+      const k = this.head; this.head = (this.head + 1) % this.n; this.count = Math.min(this.n, this.count + 1);
+      this.px[k] = x; this.pz[k] = z; this.vx[k] = vx; this.vz[k] = vz; this.age[k] = 0; this.str[k] = strength; this.u[k] = this.dist * 0.2;
+    };
+    if (this.count === 0) { this.ax = x; this.az = z; push(); return; }
+    const k0 = this.idx(0), d = Math.hypot(x - this.ax, z - this.az);
+    this.px[k0] = x; this.pz[k0] = z; this.age[k0] = 0; this.str[k0] = strength; this.vx[k0] = vx; this.vz[k0] = vz; this.u[k0] = (this.dist + d) * 0.2;
+    if (d > this.spacing) { this.dist += d; this.ax = x; this.az = z; push(); }
+  }
+  update(dt) {
+    const { n, pos, uv, col } = this;
+    const damp = Math.exp(-dt * 1.1);
+    for (let i = 1; i < this.count; i++) { const k = this.idx(i); this.age[k] += dt; this.px[k] += this.vx[k] * dt; this.pz[k] += this.vz[k] * dt; this.vx[k] *= damp; this.vz[k] *= damp; }
+    for (let i = 0; i < n; i++) {
+      const live = i < this.count, k = this.idx(live ? i : Math.max(0, this.count - 1));
+      const kp = this.idx(Math.max(0, Math.min(this.count - 1, i - 1))), kn = this.idx(Math.max(0, Math.min(this.count - 1, i + 1)));
+      let tx = this.px[kp] - this.px[kn], tz = this.pz[kp] - this.pz[kn]; const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
+      const f = Math.min(1, this.age[k] / this.life);
+      const w = (this.w0 + (this.w1 - this.w0) * Math.sqrt(f)) * 0.5;
+      const a = live && this.count > 1 ? this.str[k] * (1 - f) * (1 - f) * Math.min(1, i * 0.6 + 0.25) : 0;
+      const o = i * 6, x = this.px[k], z = this.pz[k];
+      pos[o] = x - tz * w; pos[o + 2] = z + tx * w; pos[o + 3] = x + tz * w; pos[o + 5] = z - tx * w;
+      uv[i * 4] = this.u[k]; uv[i * 4 + 1] = 0; uv[i * 4 + 2] = this.u[k]; uv[i * 4 + 3] = 1;
+      col[i * 8 + 3] = a; col[i * 8 + 7] = a;
+    }
+    this.geo.attributes.position.needsUpdate = true; this.geo.attributes.uv.needsUpdate = true; this.geo.attributes.color.needsUpdate = true;
+  }
+  clear() { this.count = 0; this.age.fill(1e9); }
+}
+export function makeWake(env) {
+  const g = new THREE.Group();
+  const foam = makeFoamTexture();
+  const mat = () => floatOnWaves(new THREE.MeshBasicMaterial({ color: '#ffffff', map: foam, transparent: true, depthWrite: false, vertexColors: true, side: THREE.DoubleSide }), env, 0.06);
+  const stern = new Ribbon(72, mat(), { life: 7, w0: 0.45, w1: 2.6, spacing: 0.35 });
+  const bowL = new Ribbon(30, mat(), { life: 2.6, w0: 0.16, w1: 0.9, spacing: 0.3 });
+  const bowR = new Ribbon(30, mat(), { life: 2.6, w0: 0.16, w1: 0.9, spacing: 0.3 });
+  for (const r of [stern, bowL, bowR]) g.add(r.mesh);
+  let lastX = null, lastZ = null;
+  // (x, z) — лодка; (fx, fz) — нос, (sx, sz) — правый борт; speed — ход, м/с
+  g.userData.update = (dt, x, z, fx, fz, sx, sz, speed) => {
+    if (lastX !== null && Math.hypot(x - lastX, z - lastZ) > 5) { stern.clear(); bowL.clear(); bowR.clear(); }  // лодку переставили
+    lastX = x; lastZ = z;
+    if (dt > 0) {
+      const sS = Math.min(1, Math.max(0, (speed - 0.3) / 2.0)) * 0.8;
+      const sB = Math.min(1, Math.max(0, (speed - 0.9) / 2.0)) * 1.0;
+      stern.track(x - fx * 2.0, z - fz * 2.0, 0, 0, sS);
+      const out = 0.34 * speed;      // усы расходятся под углом Кельвина (~19°)
+      bowL.track(x + fx * 1.55 - sx * 0.28, z + fz * 1.55 - sz * 0.28, -sx * out, -sz * out, sB);
+      bowR.track(x + fx * 1.55 + sx * 0.28, z + fz * 1.55 + sz * 0.28, sx * out, sz * out, sB);
+      stern.update(dt); bowL.update(dt); bowR.update(dt);
     }
   };
   return g;

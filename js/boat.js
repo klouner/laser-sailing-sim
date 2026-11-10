@@ -283,13 +283,26 @@ function makeHullDecal(side, tex) {
 }
 
 // ---------- вспомогательные ----------
-function limb(mat, r) {
+// Сегмент конечности от сустава a к суставу b: радиус r0 у начала, r1 у конца
+const _limbD = new THREE.Vector3();
+function limb(mat, r0, r1 = r0 * 0.8) {
   const g = new THREE.Group();
-  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.85, 1, 10), mat); cyl.position.y = 0.5; cyl.castShadow = true;
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat); cap.castShadow = true;
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, 1, 14), mat); cyl.position.y = 0.5; cyl.castShadow = true;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(r0, 12, 10), mat);
   g.add(cyl); g.add(cap);
-  g.userData.set = (a, b) => { const d = b.clone().sub(a); const L = d.length(); g.position.copy(a); g.quaternion.setFromUnitVectors(Y, d.normalize()); cyl.scale.y = L; cyl.position.y = L / 2; };
+  g.userData.set = (a, b) => { const d = _limbD.copy(b).sub(a); const L = d.length() || 1e-4; g.position.copy(a); g.quaternion.setFromUnitVectors(Y, d.divideScalar(L)); cyl.scale.y = L; cyl.position.y = L / 2; };
   return g;
+}
+// Парус просвечивает: сторона, обращённая от солнца, получает часть прошедшего сквозь ткань света
+function backlit(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      #if NUM_DIR_LIGHTS > 0
+        totalEmissiveRadiance += diffuseColor.rgb * directionalLights[0].color * 0.085 * max(dot(-normal, directionalLights[0].direction), 0.0);
+      #endif`);
+  };
+  mat.customProgramCacheKey = () => 'backlit';
+  return mat;
 }
 // Трос фиксированной топологии: nPts опорных точек, ROPE_SUB делений на отрезок.
 // Геометрия создаётся один раз, вершины пересчитываются на месте — без выделения памяти в кадре.
@@ -386,32 +399,20 @@ function foilMesh(shape, thickness, mat) {
 // ---------- кинематика рук ----------
 // Кисть не дальше вытянутой руки: подтягиваем цель к плечу
 function clampReach(shoulder, hand, reach) {
-  const d = hand.clone().sub(shoulder); const L = d.length();
-  if (L > reach) hand.copy(shoulder).addScaledVector(d, reach / L);
+  const dx = hand.x - shoulder.x, dy = hand.y - shoulder.y, dz = hand.z - shoulder.z, L = Math.hypot(dx, dy, dz);
+  if (L > reach) { const k = reach / L; hand.set(shoulder.x + dx * k, shoulder.y + dy * k, shoulder.z + dz * k); }
   return hand;
 }
-// Точка на сфере радиуса r1 вокруг c1, не дальше r2 от c2, ближайшая к желаемой target
-function solveTwoSpheres(c1, r1, c2, r2, target) {
-  const d = c2.clone().sub(c1); const D = d.length(); const dh = d.clone().normalize();
-  if (D >= r1 + r2) return c1.clone().addScaledVector(dh, r1);           // недостижимо — тянемся как можем
-  let R = THREE.MathUtils.clamp(target.distanceTo(c2), 0.22, r2);
-  R = THREE.MathUtils.clamp(R, Math.abs(r1 - D) + 0.01, r1 + D - 0.01);
-  const a = (r1 * r1 - R * R + D * D) / (2 * D);
-  const hgt = Math.sqrt(Math.max(0, r1 * r1 - a * a));
-  const center = c1.clone().addScaledVector(dh, a);
-  const off = target.clone().sub(center); off.addScaledVector(dh, -off.dot(dh));
-  if (off.lengthSq() < 1e-6) off.set(0, 1, 0).addScaledVector(dh, -dh.y);
-  return center.addScaledVector(off.normalize(), hgt);
-}
-// Локоть для двухзвенной руки; pole — направление сгиба
-function solveElbow(shoulder, hand, L1, L2, pole, out) {
-  const d = hand.clone().sub(shoulder); let D = d.length(); if (D < 1e-4) { out.copy(shoulder).add(new THREE.Vector3(0, -L1, 0)); return out; }
-  D = Math.min(D, L1 + L2 - 1e-3); const dh = d.normalize();
-  const a = (L1 * L1 - L2 * L2 + D * D) / (2 * D);
-  const hgt = Math.sqrt(Math.max(0, L1 * L1 - a * a));
-  const p = pole.clone().addScaledVector(dh, -pole.dot(dh)); if (p.lengthSq() < 1e-6) p.set(0, -1, 0).addScaledVector(dh, -dh.y * -1);
-  out.copy(shoulder).addScaledVector(dh, a).addScaledVector(p.normalize(), hgt);
-  return out;
+// Средний сустав двухзвенной конечности (локоть, колено); pole — куда сгибается
+function solveElbow(root, end, L1, L2, pole, out) {
+  let dx = end.x - root.x, dy = end.y - root.y, dz = end.z - root.z, D = Math.hypot(dx, dy, dz);
+  if (D < 1e-4) return out.set(root.x, root.y - L1, root.z);
+  dx /= D; dy /= D; dz /= D; D = Math.min(D, L1 + L2 - 1e-3);
+  const a = (L1 * L1 - L2 * L2 + D * D) / (2 * D), hgt = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  const pd = pole.x * dx + pole.y * dy + pole.z * dz;
+  let px = pole.x - dx * pd, py = pole.y - dy * pd, pz = pole.z - dz * pd, pl = Math.hypot(px, py, pz);
+  if (pl < 1e-5) { px = 0; py = -1; pz = 0; pl = 1; }
+  return out.set(root.x + dx * a + px / pl * hgt, root.y + dy * a + py / pl * hgt, root.z + dz * a + pz / pl * hgt);
 }
 
 // ---------- сборка лодки ----------
@@ -500,9 +501,35 @@ export function createBoat() {
   lower.position.copy(mastAt((BOOM_H + 0.3) / 2 - 0.3)); lower.rotation.z = mastTilt; lower.castShadow = true; rig.add(lower);
   const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.05, 20), matDark); collar.position.y = 0.025; rig.add(collar);
   // карман передней шкаторины: верх мачты скрыт в парусе
-  const sleeveLen = MAST_H - BOOM_H - 0.08;
-  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.046, sleeveLen, 18), new THREE.MeshStandardMaterial({ color: '#f1f0ea', roughness: 0.9 }));
-  sleeve.position.copy(mastAt(BOOM_H + 0.05 + sleeveLen / 2)); sleeve.rotation.z = mastTilt; sleeve.castShadow = true; rig.add(sleeve);
+  // Каплевидный: круглый спереди, сзади сходит на нет и поворачивается вслед за парусом.
+  const SLV_H = 16, SLV_M = 11, SLV_P = SLV_M + 1, SLV_TAIL = 0.15;
+  const slvY0 = BOOM_H + 0.05, slvY1 = MAST_H - 0.03;
+  const slvShape = [];
+  for (let m = 0; m < SLV_M; m++) { const a = (-125 + 250 * m / (SLV_M - 1)) * DEG; slvShape.push([Math.cos(a), Math.sin(a)]); }
+  const slvPos = new Float32Array((SLV_H + 1) * SLV_P * 3), slvIdx = [];
+  for (let i = 0; i < SLV_H; i++) for (let j = 0; j < SLV_P; j++) {
+    const a = i * SLV_P + j, b = i * SLV_P + (j + 1) % SLV_P, c = a + SLV_P, d = b + SLV_P;
+    slvIdx.push(a, b, c, b, d, c);
+  }
+  const slvGeo = new THREE.BufferGeometry();
+  slvGeo.setAttribute('position', new THREE.BufferAttribute(slvPos, 3)); slvGeo.setIndex(slvIdx);
+  const sleeve = new THREE.Mesh(slvGeo, new THREE.MeshStandardMaterial({ color: '#f1f0ea', roughness: 0.9, side: THREE.DoubleSide }));
+  sleeve.castShadow = true; sleeve.frustumCulled = false; sleeve.userData.keep = true; rig.add(sleeve);
+  // angleAt(v) — куда смотрит хвост кармана на высоте v (0 у гика, 1 у топа)
+  function updateSleeve(angleAt) {
+    for (let i = 0; i <= SLV_H; i++) {
+      const f = i / SLV_H, h = slvY0 + (slvY1 - slvY0) * f, r = 0.046 - 0.016 * f;
+      const cx = -RAKE * h / MAST_H, v = (h - (BOOM_H + 0.03)) / (MAST_H - 0.05 - BOOM_H - 0.03);
+      const phi = angleAt(Math.min(1, Math.max(0, v))), cs = Math.cos(phi), sn = Math.sin(phi);
+      for (let j = 0; j < SLV_P; j++) {
+        const lx = j < SLV_M ? slvShape[j][0] * r : -SLV_TAIL * (1 - 0.35 * f), lz = j < SLV_M ? slvShape[j][1] * r : 0;
+        const o = (i * SLV_P + j) * 3;
+        slvPos[o] = cx + lx * cs + lz * sn; slvPos[o + 1] = h; slvPos[o + 2] = -lx * sn + lz * cs;
+      }
+    }
+    slvGeo.attributes.position.needsUpdate = true; slvGeo.computeVertexNormals();
+  }
+  updateSleeve(() => 0);
   const mastTopCap = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.1, 12), matDark);
   mastTopCap.position.copy(mastAt(MAST_H)); mastTopCap.rotation.z = mastTilt; rig.add(mastTopCap);
 
@@ -537,12 +564,18 @@ export function createBoat() {
   sailGeo.setAttribute('position', new THREE.BufferAttribute(sailPos, 3));
   sailGeo.setAttribute('uv', new THREE.BufferAttribute(sailUV, 2));
   sailGeo.setIndex(sailIdx);
+  // плоская форма паруса не меняется — считаем её один раз, в кадре только выгибаем
+  const sailFlat = new Float32Array((NU + 1) * (NV + 1) * 3), sailShape = new Float32Array(NU + 1);
+  for (let i = 0; i <= NU; i++) {
+    sailShape[i] = Math.sin(Math.PI * Math.pow(i / NU, 0.82));
+    for (let j = 0; j <= NV; j++) { const p = SAIL.flat(i / NU, j / NV), k = (i * (NV + 1) + j) * 3; sailFlat[k] = p.x; sailFlat[k + 1] = p.y; sailFlat[k + 2] = p.chord; }
+  }
   // две текстуры: одинаковая геометрия рисунка, но глифы (цифра, шевроны) отражены — чтобы читались с обоих бортов
   const sailTex = makeSailTexture(false);
   const sailTexBack = makeSailTexture(true);
   // лицевым граням — прямые глифы, обратным — отражённые
-  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92, shadowSide: THREE.DoubleSide }));
-  const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 }));
+  const sail = new THREE.Mesh(sailGeo, backlit(new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92, shadowSide: THREE.DoubleSide })));
+  const sailBack = new THREE.Mesh(sailGeo, backlit(new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 })));
   sail.castShadow = true; sail.receiveShadow = true; sail.userData.keep = true; sailBack.userData.keep = true; sail.frustumCulled = false; sailBack.frustumCulled = false; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
   const LEECH_N = NV / 4 + 1;
@@ -587,38 +620,47 @@ export function createBoat() {
   for (const y of [-0.02, 0.17]) { const pin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.09), matAlu); pin.position.set(HULL.xStern - 0.01, transomY + y, 0); heelG.add(pin); }
 
   // ----- матрос -----
+  // Фигура из сглаженных форм: торс-тело вращения, конусные конечности на шарнирах, жилет, кепка, очки, ботинки.
   const skin = new THREE.MeshStandardMaterial({ color: '#c99474', roughness: 0.7 });
-  const suit = new THREE.MeshStandardMaterial({ color: '#1a2029', roughness: 0.75 });
-  const suitTrim = new THREE.MeshStandardMaterial({ color: '#2b3542', roughness: 0.75 });
+  const topMat = new THREE.MeshStandardMaterial({ color: '#1d2b45', roughness: 0.8 });   // брызгозащитная куртка
+  const pants = new THREE.MeshStandardMaterial({ color: '#14181f', roughness: 0.78 });   // откреночные штаны
   const vest = new THREE.MeshStandardMaterial({ color: '#ff5700', roughness: 0.65 });
   const vestTrim = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.8 });
-  const shoe = new THREE.MeshStandardMaterial({ color: '#222', roughness: 0.9 });
+  const bootMat = new THREE.MeshStandardMaterial({ color: '#1b1b1b', roughness: 0.9 });
+  const capMat = new THREE.MeshStandardMaterial({ color: '#f4f4f4', roughness: 0.8 });
   const sailor = new THREE.Group(); heelG.add(sailor);
-  const addM = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; sailor.add(m); return m; };
-  const pelvis = addM(new THREE.SphereGeometry(1, 16, 12), suit); pelvis.scale.set(0.2, 0.13, 0.17);
-  const abdomen = addM(new THREE.CylinderGeometry(0.14, 0.16, 0.16, 16), suitTrim);
-  const chest = addM(new THREE.CapsuleGeometry(0.15, 0.2, 8, 16), vest); chest.scale.set(1.25, 1, 0.8);
-  const vestBand = addM(new THREE.TorusGeometry(0.17, 0.018, 8, 24), vestTrim); vestBand.scale.set(1.25, 1, 0.8);
-  const shoulderL = addM(new THREE.SphereGeometry(0.075, 12, 10), vest), shoulderR = addM(new THREE.SphereGeometry(0.075, 12, 10), vest);
-  const neck = addM(new THREE.CylinderGeometry(0.05, 0.055, 0.1, 12), skin);
-  const headM = addM(new THREE.SphereGeometry(0.105, 20, 16), skin);
-  const cap = addM(new THREE.SphereGeometry(0.11, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#f4f4f4', roughness: 0.8 }));
-  const visor = addM(new THREE.CylinderGeometry(0.125, 0.125, 0.012, 20, 1, false, -Math.PI / 2, Math.PI), new THREE.MeshStandardMaterial({ color: '#f4f4f4' }));
-  const glasses = addM(new THREE.BoxGeometry(0.03, 0.035, 0.16), new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.3, metalness: 0.4 }));
-  const thighL = limb(suit, 0.082), thighR = limb(suit, 0.082), shinL = limb(suitTrim, 0.065), shinR = limb(suitTrim, 0.065);
-  const kneeL = addM(new THREE.SphereGeometry(0.078, 12, 10), suit), kneeR = addM(new THREE.SphereGeometry(0.078, 12, 10), suit);
-  const upArmA = limb(suit, 0.052), foreArmA = limb(skin, 0.044), upArmB = limb(suit, 0.052), foreArmB = limb(skin, 0.044);
-  const elbowA = addM(new THREE.SphereGeometry(0.05, 10, 8), suit), elbowB = addM(new THREE.SphereGeometry(0.05, 10, 8), suit);
-  const handA = addM(new THREE.SphereGeometry(0.048, 12, 10), skin), handB = addM(new THREE.SphereGeometry(0.048, 12, 10), skin);
-  handA.scale.set(1, 0.7, 1.2); handB.scale.set(1, 0.7, 1.2);
-  const footL = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe), footR = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe);
+  const addM = (geo, mat, shadow = true) => { const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; sailor.add(m); return m; };
+  const lathe = (pts) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), 20);
+  const pelvis = addM(new THREE.SphereGeometry(1, 18, 14), pants); pelvis.scale.set(0.19, 0.125, 0.16);
+  // торс: бёдра → талия → грудь → плечи (локальная ось X — линия плеч)
+  const torso = addM(lathe([[0.02, -0.02], [0.13, 0.0], [0.142, 0.07], [0.136, 0.15], [0.15, 0.25], [0.168, 0.34], [0.16, 0.42], [0.11, 0.475], [0.055, 0.5], [0.0, 0.505]]), topMat);
+  torso.scale.set(1.16, 1, 0.74);
+  const vestM = addM(lathe([[0.0, 0.135], [0.158, 0.14], [0.172, 0.24], [0.186, 0.335], [0.178, 0.415], [0.13, 0.465], [0.08, 0.485], [0.0, 0.49]]), vest);
+  vestM.scale.set(1.16, 1, 0.80);
+  const vestBand = addM(new THREE.TorusGeometry(0.168, 0.016, 8, 28), vestTrim, false); vestBand.scale.set(1.16, 1, 0.80);
+  const shoulderL = addM(new THREE.SphereGeometry(0.072, 14, 10), topMat, false), shoulderR = addM(new THREE.SphereGeometry(0.072, 14, 10), topMat, false);
+  const neck = addM(new THREE.CylinderGeometry(0.048, 0.056, 0.1, 14), skin, false);
+  const headG = new THREE.Group(); sailor.add(headG);
+  const addH = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); headG.add(m); return m; };
+  const headM = addH(new THREE.SphereGeometry(0.102, 22, 18), skin, 0, 0, 0); headM.scale.set(1, 1.1, 0.94); headM.castShadow = true;
+  addH(new THREE.SphereGeometry(0.02, 8, 6), skin, 0.1, -0.012, 0);                                                    // нос
+  for (const s of [-1, 1]) addH(new THREE.SphereGeometry(0.022, 8, 6), skin, 0.0, 0.0, s * 0.097);                     // уши
+  const capDome = addH(new THREE.SphereGeometry(0.108, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2), capMat, 0, 0.028, 0); capDome.scale.set(1, 0.92, 0.96);
+  const visor = addH(new THREE.CylinderGeometry(0.105, 0.105, 0.01, 20, 1, false, 0, Math.PI), capMat, 0.055, 0.034, 0); visor.scale.set(1, 1, 0.9);
+  addH(new THREE.BoxGeometry(0.03, 0.036, 0.172), new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.25, metalness: 0.5 }), 0.086, 0.012, 0);   // очки
+  const thighL = limb(pants, 0.088, 0.066), thighR = limb(pants, 0.088, 0.066), shinL = limb(pants, 0.062, 0.046), shinR = limb(pants, 0.062, 0.046);
+  const kneeL = addM(new THREE.SphereGeometry(0.068, 12, 10), pants, false), kneeR = addM(new THREE.SphereGeometry(0.068, 12, 10), pants, false);
+  const upArmA = limb(topMat, 0.056, 0.046), foreArmA = limb(topMat, 0.046, 0.036), upArmB = limb(topMat, 0.056, 0.046), foreArmB = limb(topMat, 0.046, 0.036);
+  const elbowA = addM(new THREE.SphereGeometry(0.047, 10, 8), topMat, false), elbowB = addM(new THREE.SphereGeometry(0.047, 10, 8), topMat, false);
+  const handA = addM(new THREE.SphereGeometry(0.044, 12, 10), bootMat, false), handB = addM(new THREE.SphereGeometry(0.044, 12, 10), bootMat, false);   // перчатки
+  handA.scale.set(1.15, 0.8, 1); handB.scale.set(1.15, 0.8, 1);
+  const bootGeo = new THREE.CapsuleGeometry(0.047, 0.15, 6, 10); bootGeo.rotateZ(Math.PI / 2); bootGeo.translate(0.055, 0, 0);
+  const footL = addM(bootGeo, bootMat), footR = addM(bootGeo, bootMat);
   [thighL, thighR, shinL, shinR, upArmA, foreArmA, upArmB, foreArmB].forEach(o => sailor.add(o));
   const handSheet = rope(heelG, matRope, 0.008, 2);
   const handPts = [new THREE.Vector3(), new THREE.Vector3()], handSag = [0];
-  // мелкие части фигуры не участвуют в проходе теней
-  for (const m of [neck, cap, visor, glasses, kneeL, kneeR, elbowA, elbowB, handA, handB, shoulderL, shoulderR, vestBand]) m.castShadow = false;
   // статичные детали — в один меш на материал
-  mergeStatic(heelG); mergeStatic(rig); mergeStatic(rudderPivot);
+  mergeStatic(heelG); mergeStatic(rig); mergeStatic(rudderPivot); mergeStatic(headG);
 
   // ---------- обновление ----------
   let flutterPhase = 0;
@@ -645,9 +687,8 @@ export function createBoat() {
       const u = i / NU;
       for (let j = 0; j <= NV; j++) {
         const v = j / NV;
-        const fp = SAIL.flat(u, v);
-        const x = fp.x, y = fp.y, chord = fp.chord;
-        const shape = Math.sin(Math.PI * Math.pow(u, 0.82));
+        const kf = (i * (NV + 1) + j) * 3;
+        const x = sailFlat[kf], y = sailFlat[kf + 1], chord = sailFlat[kf + 2], shape = sailShape[i];
         let z = -side * camberFrac * chord * shape * (1 - 0.35 * v);
         z += -side * Math.sin(twist * v) * chord * u * 0.35 * power;
         if (full > 0) {
@@ -657,8 +698,6 @@ export function createBoat() {
           const bubble = partial * 0.07 * Math.sin(flutterPhase * 1.7 + v * 4) * Math.exp(-u * 5) * (1 - 0.3 * v);
           z += side * bubble * Math.min(1, out.AWS / 3);
         }
-        // у мачты парус огибает карман
-        z += -side * 0.03 * Math.exp(-u * 12);
         const k = (i * (NV + 1) + j) * 3;
         pa[k] = x; pa[k + 1] = y; pa[k + 2] = z;
       }
@@ -667,6 +706,8 @@ export function createBoat() {
     sailGeo.computeVertexNormals();
     for (let q = 0; q < LEECH_N; q++) { const k = (NU * (NV + 1) + q * 4) * 3; leechPts[q].set(pa[k], pa[k + 1], pa[k + 2]); }
     leechRope(leechPts);
+    // хвост кармана мачты смотрит туда, куда уходит парус у передней шкаторины
+    updateSleeve((v) => { const j = Math.round(v * NV), k0 = j * 3, k2 = (2 * (NV + 1) + j) * 3; return Math.atan2(pa[k2 + 2] - pa[k0 + 2], -(pa[k2] - pa[k0])); });
     // колдунчики: наветренный дёргается вверх при малом угле атаки, подветренный обвисает при срыве
     for (const t of telltales) {
       const i = Math.round(t.u * NU), j = Math.round(t.v * NV), k = (i * (NV + 1) + j) * 3;
@@ -691,16 +732,19 @@ export function createBoat() {
   //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
   //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
   const SS = { side: 1, x: -0.35, z: 0.45, theta: 0.4, crouch: 0 };
+  // временные векторы кадра: берутся из пула, память в кадре не выделяется
+  const pool = []; let poolI = 0;
+  const tv = () => pool[poolI++] || (pool[poolI - 1] = new THREE.Vector3());
+  const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _xAxis = new THREE.Vector3(1, 0, 0);
+  const THIGH = 0.44, SHIN = 0.43, ARM1 = 0.30, ARM2 = 0.28, EXT_LEN = 1.05;
   function updateSailor(state, dt, out) {
     const side = state.side;
     const k = Math.min(1, dt * 3);
     SS.side += (side - SS.side) * Math.min(1, dt * 2.4);
     const cross = 1 - Math.min(1, Math.abs(SS.side));            // 1 — в середине перехода
-    const sgn = Math.sign(SS.side) || side;
     const twa = out ? out.twaAbs : 90, hike = state.hike, spd = state.vf;
     const light = Math.max(0, 1 - Math.abs(out ? out.Fs : 100) / 60); // штилевой режим
     const planing = Math.min(1, Math.max(0, (spd - 2.4) / 1.5));
-    // целевые параметры позы
     let tx, tz, ttheta;
     if (twa < 95) {            // против ветра и галфвинд
       tx = -0.15 - 0.25 * hike;
@@ -719,71 +763,62 @@ export function createBoat() {
     SS.crouch += (cross - SS.crouch) * Math.min(1, dt * 6);
     const h = Math.min(1, Math.max(0, (SS.theta - 0.35) / 1.1));  // степень откренивания 0..1
     const dy = deckAt(SS.x);
-    const sv = SS.side;                                               // плавная сторона −1..1 (0 — в середине перехода)
-    const lateral = sv * SS.z + (1 - Math.abs(sv)) * 0.0;             // при переходе — через центр
+    const sv = SS.side;                                           // плавная сторона −1..1 (0 — в середине перехода)
+    const lateral = sv * SS.z;
     const crouch = SS.crouch;
-    // таз
-    P.hip.set(SS.x, dy + 0.06 - 0.12 * crouch, lateral);
+    // таз: на борту, при переходе — низко над кокпитом
+    P.hip.set(SS.x, dy + 0.07 - 0.13 * crouch, lateral);
     const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
-    const lean = 0.25 * crouch;                                     // при переходе наклон вперёд
-    const dir = P.tmp.set(-0.06 + lean, Math.cos(theta), sv * Math.sin(theta)).normalize();
-    const chestC = P.hip.clone().addScaledVector(dir, 0.34);
-    P.shoulder.copy(P.hip).addScaledVector(dir, 0.5);
-    P.headP.copy(P.shoulder).addScaledVector(dir, 0.2).add(new THREE.Vector3(0.03, -0.06 * crouch, -sv * 0.04));
-    const q = new THREE.Quaternion().setFromUnitVectors(Y, dir);
-    pelvis.position.copy(P.hip); pelvis.quaternion.copy(q);
-    abdomen.position.copy(P.hip).addScaledVector(dir, 0.15); abdomen.quaternion.copy(q);
-    chest.position.copy(chestC); chest.quaternion.copy(q);
-    vestBand.position.copy(P.hip).addScaledVector(dir, 0.27); vestBand.quaternion.copy(q); vestBand.rotateX(Math.PI / 2);
-    neck.position.copy(P.shoulder).addScaledVector(dir, 0.06); neck.quaternion.copy(q);
-    headM.position.copy(P.headP);
-    cap.position.copy(P.headP).add(new THREE.Vector3(0, 0.025, 0)); cap.rotation.set(0, 0, -sv * 0.15 * h);
-    visor.position.copy(P.headP).add(new THREE.Vector3(0.07, 0.055, 0)); visor.rotation.set(0, Math.PI / 2 + sv * 0.3 * h, 0);
-    glasses.position.copy(P.headP).add(new THREE.Vector3(0.09, 0.01, 0));
+    const dir = P.tmp.set(-0.06 + 0.3 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
+    P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
+    P.headP.copy(P.hip).addScaledVector(dir, 0.655); P.headP.x += 0.03; P.headP.y -= 0.03 * crouch; P.headP.z -= sv * 0.03;
+    _q.setFromUnitVectors(Y, dir);
+    pelvis.position.copy(P.hip); pelvis.quaternion.copy(_q);
+    torso.position.copy(P.hip); torso.quaternion.copy(_q);
+    vestM.position.copy(P.hip); vestM.quaternion.copy(_q);
+    vestBand.position.copy(P.hip).addScaledVector(dir, 0.2); vestBand.quaternion.copy(_q).multiply(_q2.setFromAxisAngle(_xAxis, Math.PI / 2));
+    neck.position.copy(P.hip).addScaledVector(dir, 0.53); neck.quaternion.copy(_q);
+    // голова: смотрит вперёд, при откренивании — вверх на парус
+    headG.position.copy(P.headP);
+    headG.rotation.set(0, sv * 0.35 * (1 - h * 0.4), 0.1 + 0.3 * h);
     // плечи
-    const shA = P.shoulder.clone().add(new THREE.Vector3(-0.16, -0.03, sv * 0.02));
-    const shB = P.shoulder.clone().add(new THREE.Vector3(0.16, -0.03, sv * 0.02));
+    const shA = tv().copy(P.shoulder); shA.x -= 0.165; shA.y -= 0.02; shA.z += sv * 0.02;      // заднее
+    const shB = tv().copy(P.shoulder); shB.x += 0.165; shB.y -= 0.02; shB.z += sv * 0.02;      // переднее
     shoulderL.position.copy(shA); shoulderR.position.copy(shB);
-    // ноги: бедро ~0.42 м к центру, стопы под ремнём у диаметральной плоскости; при откренивании ноги выпрямляются
-    for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.11], [thighR, shinR, kneeR, footR, -0.11]]) {
-      const hipJ = P.hip.clone().add(new THREE.Vector3(off * 0.9, -0.05, -sv * 0.06));
-      const kneeIn = 0.40;                                             // бедро направлено к центру лодки
-      const kneeZ = lateral - sv * kneeIn * (1 - crouch) + off * 0.3;
-      const kneeY = dy + (0.18 - 0.14 * h) * (1 - crouch) + 0.02 * crouch;
-      P.knee.set(SS.x + off * 0.9 + 0.04 * h, kneeY, kneeZ);
-      const footZ = THREE.MathUtils.clamp(lateral - sv * 0.85, -0.2, 0.2) + off * 0.45;
-      P.foot.set(SS.x + 0.08 + off * 0.9, floorY + 0.05, footZ);
-      thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, P.foot);
+    // ноги: двухзвенная кинематика. Стопы под ремнём откренивания, колено сгибается вверх;
+    // чем дальше матрос вывешивается, тем прямее ноги.
+    const poleLeg = tv().set(0.25 * crouch, 1, sv * 0.25);
+    for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.12], [thighR, shinR, kneeR, footR, -0.12]]) {
+      const hipJ = tv().copy(P.hip); hipJ.x += off * 0.85; hipJ.y -= 0.03; hipJ.z -= sv * 0.07;
+      const ft = tv().set(SS.x + off * 1.25 + 0.05, floorY + 0.075, THREE.MathUtils.clamp(lateral - sv * 0.62, -0.13, 0.13) - sv * 0.02 * (1 - crouch));
+      clampReach(hipJ, ft, THIGH + SHIN - 0.015);
+      solveElbow(hipJ, ft, THIGH, SHIN, poleLeg, P.knee);
+      // колено не ниже палубы: бедро лежит на борту
+      const deckK = deckAt(P.knee.x) + (cockpitSDF(P.knee.x, P.knee.z) < 0 ? -COCKPIT.depth : 0) + 0.085;
+      if (P.knee.y < deckK) P.knee.y = deckK;
+      thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, ft);
       knee.position.copy(P.knee);
-      foot.position.copy(P.foot).add(new THREE.Vector3(0.04, 0, -sv * 0.02)); foot.rotation.set(0, sv * 0.35, 0);
+      foot.position.copy(ft); foot.rotation.set(0, sv >= 0 ? Math.PI / 2 : -Math.PI / 2, 0.5 * (1 - crouch));   // носок вверх, под ремень
     }
-    // руки: двухзвенная кинематика (плечо 0.30 м, предплечье 0.28 м), кисть не дальше вытянутой руки
-    const L1 = 0.30, L2 = 0.28, REACH = L1 + L2 - 0.02;
+    // руки: кисть не дальше вытянутой руки
+    const REACH = ARM1 + ARM2 - 0.02;
     const run = twa >= 150;
-    const EXT_LEN = 1.05;
-    // задняя рука: удлинитель румпеля держится поперёк корпуса у бедра; конец удлинителя — на сфере EXT_LEN вокруг шарнира
-    const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(new THREE.Vector3()));
-    // удобный хват: сбоку-сзади от таза, снаружи торса (торс ~0.19 м в ширину); кисть скользит по удлинителю
-    const wantA = new THREE.Vector3(SS.x - 0.2, dy + 0.3 - 0.06 * crouch, lateral + sv * 0.27 * (1 - crouch) + sv * 0.12 * crouch);
-    const toWant = wantA.clone().sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
-    const grip = THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN);
-    P.handA.copy(pivotHull).addScaledVector(toWant, grip);
+    // задняя рука держит удлинитель румпеля сбоку-сзади от таза, снаружи торса; кисть скользит по удлинителю
+    const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(tv()));
+    const wantA = tv().set(SS.x - 0.2, dy + 0.3 - 0.06 * crouch, lateral + sv * 0.27 * (1 - crouch) + sv * 0.12 * crouch);
+    const toWant = tv().copy(wantA).sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
+    P.handA.copy(pivotHull).addScaledVector(toWant, THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN));
     clampReach(shA, P.handA, REACH);
     // передняя рука: шкот; на фордевинде — участок шкота от блока к гику
-    if (run) {
-      const bm = boomBlockMid.clone().applyAxisAngle(Y, rig.rotation.y).add(mastBase);
-      P.handB.copy(blockTop).lerp(bm, 0.3);
-    } else {
-      P.handB.set(SS.x + 0.35, dy + 0.36 - 0.1 * h - 0.1 * crouch, lateral - sv * 0.05 + sv * 0.1 * h);
-    }
+    if (run) { const bm = tv().copy(boomBlockMid).applyAxisAngle(Y, rig.rotation.y).add(mastBase); P.handB.copy(blockTop).lerp(bm, 0.3); }
+    else P.handB.set(SS.x + 0.35, dy + 0.36 - 0.1 * h - 0.1 * crouch, lateral - sv * 0.05 + sv * 0.1 * h);
     clampReach(shB, P.handB, REACH);
-    // локти: задняя рука — вниз и наружу-назад, передняя — вниз
-    solveElbow(shA, P.handA, L1, L2, new THREE.Vector3(-0.4, -1, sv * 0.6), P.elbowA);
-    solveElbow(shB, P.handB, L1, L2, new THREE.Vector3(0.2, -1, sv * 0.3), P.elbowB);
+    solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-0.4, -1, sv * 0.6), P.elbowA);
+    solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2, -1, sv * 0.3), P.elbowB);
     upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
     upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
-    // удлинитель румпеля направлен на точку хвата, кисть лежит на нём, длина постоянная
-    const local = rudderPivot.worldToLocal(heelG.localToWorld(pivotHull.clone().addScaledVector(toWant, EXT_LEN)));
+    // удлинитель румпеля направлен на точку хвата, длина постоянная
+    const local = rudderPivot.worldToLocal(heelG.localToWorld(tv().copy(pivotHull).addScaledVector(toWant, EXT_LEN)));
     const d = local.sub(extPivot.position);
     extPivot.rotation.set(0, Math.atan2(-d.z, d.x), Math.atan2(d.y, Math.hypot(d.x, d.z)));
     extension.scale.y = EXT_LEN / 1.1; extension.position.x = EXT_LEN / 2; extGrip.position.x = EXT_LEN - 0.1;
@@ -796,14 +831,27 @@ export function createBoat() {
     handSag[0] = Math.max(0, sag); handSheet(handPts, handSag);
   }
 
-  function update(state, out, ctl, dt, t) {
+  // качка на волнах: сглаженные высота и уклоны воды под корпусом
+  const sea = { heave: 0, sf: 0, ss: 0 };
+  function update(state, out, ctl, dt, t, env = null) {
+    poolI = 0;
     out.side = state.side;
     root.position.set(state.x, 0, state.z);
     root.rotation.y = Math.PI / 2 - state.heading * DEG;
-    const bob = Math.sin(t * 1.3) * 0.015 + Math.sin(t * 2.1 + 1) * 0.01;
-    heelG.rotation.x = -state.heel * DEG;
-    heelG.rotation.z = (Math.sin(t * 0.9) * 0.8 - Math.min(2.5, state.vf * 0.9)) * DEG;
-    heelG.position.y = bob;
+    // Лодка идёт по волнам: высота и уклоны воды берутся из той же формулы, что рисует море.
+    // Короткая рябь (короче корпуса) на качку не влияет.
+    if (env) {
+      const fx = out.fx, fz = out.fz, sx = out.sx, sz = out.sz, x = state.x, z = state.z, ML = 3.5;
+      const hB = env.heightAt(x + fx * 1.7, z + fz * 1.7, ML), hS = env.heightAt(x - fx * 1.7, z - fz * 1.7, ML);
+      const hR = env.heightAt(x + sx * 0.5, z + sz * 0.5, ML), hL = env.heightAt(x - sx * 0.5, z - sz * 0.5, ML), hC = env.heightAt(x, z, ML);
+      const kk = Math.min(1, dt * 7);
+      sea.heave += ((hB + hS + hR + hL + 2 * hC) / 6 - sea.heave) * kk;
+      sea.sf += ((hB - hS) / 3.4 - sea.sf) * kk; sea.ss += ((hR - hL) / 1.0 - sea.ss) * kk;
+      env.setBoatPlane(fx, fz, sea.heave, sea.sf, sea.ss, 1);
+    }
+    heelG.rotation.x = -state.heel * DEG - Math.atan(sea.ss) * 0.55;
+    heelG.rotation.z = Math.atan(sea.sf) - Math.min(2.5, state.vf * 0.9) * DEG;   // на ходу лёгкий дифферент на корму
+    heelG.position.y = sea.heave;
 
     rig.rotation.y = state.boom * DEG; // boom>0 → гик по правому борту (+z): локальная −x при повороте на +θ уходит в +z
     windex.rotation.y = -out.AWA * DEG - rig.rotation.y; // указывает, откуда вымпельный ветер (в системе корпуса)

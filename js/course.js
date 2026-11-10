@@ -1,5 +1,6 @@
 // Трасса: наветренный буй и финишные ворота из двух буёв. Гонка на время.
 import * as THREE from 'three';
+import { floatOnWaves } from './env.js';
 
 export const COURSE = {
   windward: { x: 0, z: -110, name: 'наветренный буй' },
@@ -14,36 +15,40 @@ export function fmtTime(s) {
   return `${m}:${r < 10 ? '0' : ''}${r.toFixed(1)}`;
 }
 
-function makeMark(color, ringR) {
+function makeMark(color, ringR, env) {
   const g = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 1.3, 24), mat);
-  body.position.y = 0.55; body.castShadow = true; g.add(body);
+  body.position.y = 0.55; body.castShadow = true;
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat);
-  top.position.y = 1.2; g.add(top);
+  top.position.y = 1.2;
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.2, 8), new THREE.MeshStandardMaterial({ color: '#dddddd' }));
-  pole.position.y = 2.3; g.add(pole);
+  pole.position.y = 2.3;
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ color: '#ffffff', side: THREE.DoubleSide }));
-  flag.position.set(0.45, 3.1, 0); g.add(flag);
+  flag.position.set(0.45, 3.1, 0);
   // световой столб и кольцо для «следующего» знака
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.2, 14, 24, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
-  beam.position.y = 7; g.add(beam);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(ringR - 0.25, ringR, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.3; g.add(ring);
+  beam.position.y = 7;
+  const ringGeo = new THREE.RingGeometry(ringR - 0.25, ringR, 96); ringGeo.rotateX(-Math.PI / 2);
+  const ring = new THREE.Mesh(ringGeo, floatOnWaves(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }), env, 0.07));
+  ring.frustumCulled = false;
   beam.renderOrder = 3; ring.renderOrder = 3;
-  g.userData = { body, beam, ring, flag };
+  const bob = new THREE.Group(); bob.add(body, top, pole, flag, beam);   // качается на волне; кольцо лежит на воде отдельно
+  g.add(bob); g.add(ring);
+  g.userData = { body, beam, ring, flag, bob };
   return g;
 }
 
-export function createCourse(scene) {
+export function createCourse(scene, env) {
   const group = new THREE.Group(); group.visible = false; scene.add(group);
-  const mW = makeMark('#ff5700', 5);
+  const mW = makeMark('#ff5700', 5, env);
   mW.position.set(COURSE.windward.x, 0, COURSE.windward.z); group.add(mW);
-  const gates = COURSE.gate.map((p) => { const m = makeMark('#0047ff', 1.6); m.position.set(p.x, 0, p.z); group.add(m); return m; });
+  const gates = COURSE.gate.map((p) => { const m = makeMark('#0047ff', 1.6, env); m.position.set(p.x, 0, p.z); group.add(m); return m; });
   // финишная линия между буями ворот
   const lineLen = COURSE.gate[1].x - COURSE.gate[0].x - 1.2;
-  const finishLine = new THREE.Mesh(new THREE.PlaneGeometry(lineLen, 0.35, 24, 1), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
-  finishLine.rotation.x = -Math.PI / 2; finishLine.position.set(0, 0.3, 0); finishLine.renderOrder = 3; group.add(finishLine);
+  const lineGeo = new THREE.PlaneGeometry(lineLen, 0.35, 48, 1); lineGeo.rotateX(-Math.PI / 2);
+  const finishLine = new THREE.Mesh(lineGeo, floatOnWaves(new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }), env, 0.07));
+  finishLine.frustumCulled = false; finishLine.renderOrder = 3; group.add(finishLine);
   const marks3d = [mW, ...gates];
 
   const race = {
@@ -76,7 +81,13 @@ export function createCourse(scene) {
 
   function update(state, ctl, dt, t) {
     const fl = 0.25 * Math.sin(t * 4);
-    for (const m of marks3d) m.userData.flag.rotation.y = fl;
+    if (group.visible) for (const m of marks3d) {
+      m.userData.flag.rotation.y = fl;
+      // буй качается на волне
+      const bx = m.position.x, bz = m.position.z, h0 = env.heightAt(bx, bz, 3.5);
+      m.userData.bob.position.y = h0 * 0.85;
+      m.userData.bob.rotation.z = (env.heightAt(bx + 0.6, bz, 3.5) - h0) * 0.9; m.userData.bob.rotation.x = -(env.heightAt(bx, bz + 0.6, 3.5) - h0) * 0.9;
+    }
     if (!race.active) return null;
     let event = null;
     if (race.phase === 'countdown') {

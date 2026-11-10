@@ -5,6 +5,7 @@ import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindS
 import { createState, defaultControls, step, norm180, norm360, compassName, optimalSheet, KN, PHYS_DT } from './physics.js';
 import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
+import { createEnvironment } from './env.js';
 import { LESSONS, createLessonRunner } from './lessons.js';
 import { loadTop, isRecord, submit, rememberName, savedName, isShared } from './leaderboard.js';
 import { initAnalytics } from './analytics.js';
@@ -61,13 +62,13 @@ scene.add(new THREE.HemisphereLight('#bcd7f5', '#1b4a70', 0.9));
 
 const sky = makeSky(); scene.add(sky);
 const clouds = makeClouds(); scene.add(clouds);
-const water = makeWater(); scene.add(water);
-const compass = makeCompassRing(); scene.add(compass);
+const env = createEnvironment();   // волны и порывы: общие для физики, качки и шейдеров
+const water = makeWater(env); scene.add(water);
+const compass = makeCompassRing(env); scene.add(compass);
 const streaks = makeWindStreaks(); scene.add(streaks);
-const wake = makeWake(); scene.add(wake);
+const wake = makeWake(env); scene.add(wake);
 // фиксированный порядок прозрачных слоёв: вода → кильватер → компас (иначе сортировка по расстоянию даёт мерцание)
 water.renderOrder = 1;
-wake.traverse((o) => { if (o.isMesh) o.renderOrder = 2; });
 compass.traverse((o) => { if (o.isMesh || o.isLine || o.isLineSegments) o.renderOrder = 3; });
 streaks.renderOrder = 4;
 
@@ -84,7 +85,7 @@ arrows.appWind.labelAt = 0.4; arrows.appWind.labelLift = 0.5;
 arrows.vel.labelAt = 1.0; arrows.vel.labelLift = 0.45;
 arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.45;
 
-const course = createCourse(scene);
+const course = createCourse(scene, env);
 const lessons = createLessonRunner();
 
 // ---------- состояние ----------
@@ -431,7 +432,8 @@ function updateTraining(out, dt, t) {
     if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; }
   }
 }
-window.__sim = { state, ctl, course, lessons, startRace, startLesson, renderer, scene, get dpr() { return dpr; } };
+// отладочный доступ: состояние и перемотка времени (используется автотестами)
+window.__sim = { state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -454,12 +456,13 @@ function setCamera(mode) {
   camera.position.copy(target).add(off);
   controls.target.copy(target);
 }
+const camT = new THREE.Vector3(), camO = new THREE.Vector3(), camUp = new THREE.Vector3(0, 1, 0);
 function updateCamera(dt) {
-  const target = boat.root.position.clone().add(camTargetOffset);
-  let off = camera.position.clone().sub(controls.target);
+  const target = camT.copy(boat.root.position).add(camTargetOffset);
+  const off = camO.copy(camera.position).sub(controls.target);
   if (camMode === 'chase' || camMode === 'side') {
     const dh = norm180(state.heading - lastHeading) * DEG;
-    off.applyAxisAngle(new THREE.Vector3(0, 1, 0), -dh);
+    off.applyAxisAngle(camUp, -dh);
   }
   lastHeading = state.heading;
   controls.target.copy(target);
@@ -476,7 +479,7 @@ function setText(id, text) { if (textCache.get(id) !== text) { textCache.set(id,
 let narrow = window.innerWidth < 420;
 function updateUI(out, dt) {
   uiAcc += dt; if (uiAcc < 0.1) return; uiAcc = 0;
-  setText('v-windFrom', `${Math.round(ctl.windFrom)}°` + (ctl.gusts && Math.abs(out.windFrom - ctl.windFrom) > 2 ? ` (сейчас ${Math.round(norm360(out.windFrom))}°)` : ''));
+  setText('v-windFrom', `${Math.round(ctl.windFrom)}°` + (ctl.gusts && Math.abs(out.windFrom - ctl.windFrom) > 2 ? ` (сейчас ${(Math.round(norm360(out.windFrom)) % 360)}°)` : ''));
   setText('v-windName', compassName(ctl.windFrom));
   setText('v-windSpeed', `${fmt(ctl.windSpeed, 1)} уз` + (ctl.gusts ? ` (сейчас ${fmt(out.windKn, 1)})` : ''));
   setText('v-heading', `${Math.round(state.heading)}°`);
@@ -488,7 +491,7 @@ function updateUI(out, dt) {
   setText('v-rudder', r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо →' : '← влево'}`);
   setText('t-rudder-val', r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо' : 'влево'}`);
   setText('t-sheet-val', `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' авто' : ''));
-  setText('t-windChip', `Ветер ${Math.round(norm360(out.windFrom))}° ${compassName(out.windFrom)} · ${fmt(out.windKn, 0)} уз`);
+  setText('t-windChip', `Ветер ${(Math.round(norm360(out.windFrom)) % 360)}° ${compassName(out.windFrom)} · ${fmt(out.windKn, 0)} уз`);
   if (document.activeElement !== ui.rudder) ui.rudder.value = r;
 
   setText('pos-name', out.pos.name);
@@ -576,15 +579,11 @@ function adaptQuality(rawDt) {
     dpr = Math.min(perf.cap, +(dpr + 0.25).toFixed(2)); perf.fast = 0; layoutDirty = true;
   }
 }
-const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
 
 let mapAcc = 1, physAcc = 0, lastGybeSeen = -1;
-function frame() {
-  requestAnimationFrame(frame);
-  const rawDt = clock.getDelta();
-  adaptQuality(rawDt);
-  if (layoutDirty) { layoutDirty = false; resize(); }
-  const dt = Math.min(0.05, rawDt);
+// Один шаг модели: управление, среда, физика, положение объектов сцены. Не рисует.
+function simulate(dt) {
   t += dt;
   handleKeys(dt);
   updateCompass(dt);
@@ -598,10 +597,11 @@ function frame() {
   }
 
   // физика с фиксированным шагом 120 Гц: поведение лодки не зависит от частоты кадров
+  env.update(dt, state.x, state.z, ctl.windFrom, ctl.windSpeed, ctl.gusts, ctl.paused);
   physAcc = Math.min(physAcc + dt, PHYS_DT * 8);
   let out = state.out;
-  while (physAcc >= PHYS_DT) { out = step(state, ctl, PHYS_DT, null); physAcc -= PHYS_DT; }
-  if (!out || out.AWS === undefined) out = step(state, ctl, 0, null);
+  while (physAcc >= PHYS_DT) { out = step(state, ctl, PHYS_DT, env); physAcc -= PHYS_DT; }
+  if (!out || out.AWS === undefined) out = step(state, ctl, 0, env);
   if (state.lastGybe.time !== lastGybeSeen) {
     lastGybeSeen = state.lastGybe.time;
     if (state.lastGybe.kick > 14) toast(state.lastGybe.kick > 28 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
@@ -609,35 +609,44 @@ function frame() {
   updateTraining(out, dt, t);
 
   // сцена
-  boat.update(state, out, ctl, dt, t);
+  boat.update(state, out, ctl, dt, t, env);
   water.userData.update(t, Math.round(state.x), Math.round(state.z), ctl.windFrom * DEG);
   compass.userData.update(state.x, state.z, out.windFrom);
   compass.userData.setNoGo(show.noGo);
   streaks.visible = show.streaks;
   if (show.streaks) streaks.userData.update(ctl.paused ? 0 : dt, state.x, state.z, out.Wx, out.Wz, ctl.windSpeed);
-  const stern = tmpA.set(HULL.xStern + 0.2, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), boat.root.rotation.y).add(boat.root.position);
-  wake.userData.update(ctl.paused ? 0 : dt, stern.x, stern.z, state.vf, state.heading * DEG);
+  wake.userData.update(ctl.paused || out.capsized ? 0 : dt, state.x, state.z, out.fx, out.fz, out.sx, out.sz, state.vf);
   clouds.position.set(state.x, 0, state.z);
   sky.position.set(state.x, 0, state.z);
   sun.position.copy(boat.root.position).addScaledVector(sunDir, 40);
   sun.target.position.copy(boat.root.position);
+  return out;
+}
+function frame() {
+  requestAnimationFrame(frame);
+  const rawDt = clock.getDelta();
+  adaptQuality(rawDt);
+  if (layoutDirty) { layoutDirty = false; resize(); }
+  const dt = Math.min(0.05, rawDt);
+  const out = simulate(dt);
 
   // стрелки
-  const center = boat.root.position.clone(); center.y = 0.95;
+  const center = tmpC.copy(boat.root.position); center.y = 0.95 + boat.heelG.position.y;
   const WS = 0.5; // м на 1 м/с ветра
-  const endAt = (vx, vz, R) => { const L = Math.hypot(vx, vz) || 1; return new THREE.Vector3(center.x - vx / L * R, center.y, center.z - vz / L * R); };
+  const endAt = (v, vx, vz, R) => { const L = Math.hypot(vx, vz) || 1; return v.set(center.x - vx / L * R, center.y, center.z - vz / L * R); };
   arrows.trueWind.setVisible(show.trueWind, show.labels);
-  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(out.Wx, out.Wz, 1.0), `Ветер ${fmt(out.windKn, 0)} уз`, dt);
+  arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(tmpA, out.Wx, out.Wz, 1.0), `Ветер ${fmt(out.windKn, 0)} уз`, dt);
   arrows.appWind.setVisible(show.appWind, show.labels);
-  const appFrom = new THREE.Vector3(center.x - out.Ax * WS, 2.4, center.z - out.Az * WS);
-  const appTo = endAt(out.Ax, out.Az, 0.6); appTo.y = 2.4; appFrom.y = 2.4;
+  const appY = center.y + 1.45;
+  const appFrom = tmpB.set(center.x - out.Ax * WS, appY, center.z - out.Az * WS);
+  const appTo = endAt(tmpA, out.Ax, out.Az, 0.6); appTo.y = appY;
   arrows.appWind.set(appFrom, appTo, `Вымпельный ${fmt(out.AWS / KN, 0)} уз`, dt);
   arrows.vel.setVisible(show.vel, show.labels);
-  arrows.vel.set(center, new THREE.Vector3(center.x + out.Vx * 1.3, center.y, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
+  arrows.vel.set(center, tmpA.set(center.x + out.Vx * 1.3, center.y, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
   arrows.force.setVisible(show.force, show.labels);
   const fs = 0.012;
-  const fOrigin = boat.root.position.clone().add(boatForward().multiplyScalar(0.3)); fOrigin.y = 1.7;
-  arrows.force.set(fOrigin, new THREE.Vector3(fOrigin.x + out.forceWorldX * fs, 1.7, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
+  const fOrigin = tmpB.set(center.x + out.fx * 0.3, center.y + 0.75, center.z + out.fz * 0.3);
+  arrows.force.set(fOrigin, tmpA.set(fOrigin.x + out.forceWorldX * fs, fOrigin.y, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
 
   ctl.sheetShown = out.sheet;
   updateTouch();
