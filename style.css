@@ -252,3 +252,8 @@ details[open] summary::before{transform:rotate(90deg)}
   .pad-v .pad-track{min-height:72px}
   .pad-h .pad-track{height:40px}
 }
+.row-head{display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 6px;font-size:13px;color:#d6d6d6}
+.row-head small{color:var(--muted);font-size:11px}
+.fps{position:absolute;left:16px;top:88px;z-index:5;background:rgba(18,18,18,.72);border:1px solid var(--border);border-radius:999px;padding:4px 10px;font:500 11px Inter,sans-serif;color:#cfcfcf;font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
+.fps[hidden]{display:none}
+@media (max-width:899px){.fps{left:auto;right:8px;top:calc(8px + env(safe-area-inset-top,0px));padding:3px 8px;font-size:10px}}

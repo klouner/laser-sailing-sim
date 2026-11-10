@@ -17,14 +17,27 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
 // Профиль качества: на телефоне дешевле тени и нет двойного сглаживания (при плотности ≥2 оно почти не видно)
 const isTouch = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
-const QUALITY = isTouch
-  ? { maxDpr: Math.min(window.devicePixelRatio || 1, 2), minDpr: 1, shadow: 1024, soft: false, antialias: (window.devicePixelRatio || 1) < 2 }
-  : { maxDpr: Math.min(window.devicePixelRatio || 1, 2), minDpr: 1, shadow: 2048, soft: true, antialias: true };
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: QUALITY.antialias, powerPreference: 'high-performance' });
+// Уровни качества. fx: 0 — без эффектов, 1 — брызги и пена, 2 — ещё и отражение лодки в воде.
+const DEVICE_DPR = window.devicePixelRatio || 1;
+const LEVELS = {
+  low: { maxDpr: Math.min(DEVICE_DPR, 1), minDpr: 0.75, shadow: 512, fx: 0 },
+  med: { maxDpr: Math.min(DEVICE_DPR, 1.5), minDpr: 1, shadow: 1024, fx: 1 },
+  high: { maxDpr: Math.min(DEVICE_DPR, 2), minDpr: 1, shadow: 2048, fx: 2 },
+};
+const LEVEL_NAME = { low: 'низкое', med: 'среднее', high: 'высокое' };
+const prefs = { quality: 'auto', fps: false };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem('laser3d.view') || '{}')); } catch (e) {}
+if (!LEVELS[prefs.quality]) prefs.quality = 'auto';
+const savePrefs = () => { try { localStorage.setItem('laser3d.view', JSON.stringify(prefs)); } catch (e) {} };
+const autoLevel = isTouch ? 'med' : 'high';
+let level = prefs.quality === 'auto' ? autoLevel : prefs.quality;
+let QUALITY = LEVELS[level];
+// сглаживание и тип теней задаются один раз при создании контекста; остальное меняется на лету
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: level !== 'low' && !(isTouch && DEVICE_DPR >= 2), powerPreference: 'high-performance' });
 let dpr = QUALITY.maxDpr;
 renderer.setPixelRatio(dpr);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = QUALITY.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+renderer.shadowMap.type = !isTouch && level !== 'low' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -434,7 +447,7 @@ function updateTraining(out, dt, t) {
   }
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { get level() { return level; }, prefs, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -566,20 +579,47 @@ function resize() {
   layoutOverlays(w, h);
 }
 // Адаптивное разрешение: если кадры идут медленно, плавно снижаем плотность пикселей; при запасе — возвращаем
-const perf = { acc: 0, n: 0, slow: 0, fast: 0, cap: QUALITY.maxDpr };
+const perf = { acc: 0, n: 0, slow: 0, fast: 0, cap: QUALITY.maxDpr, fps: 0 };
+const fx = { level: QUALITY.fx };                    // читают эффекты сцены: брызги, пена, отражение
+function setLevel(name) {
+  level = name; QUALITY = LEVELS[name]; fx.level = QUALITY.fx;
+  dpr = QUALITY.maxDpr; perf.cap = dpr; perf.slow = 0; perf.fast = 0;
+  if (sun.shadow.mapSize.x !== QUALITY.shadow) {
+    sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  layoutDirty = true; showQuality(); showFps();
+}
+function showQuality() {
+  for (const b of $('q-seg').children) b.classList.toggle('active', b.dataset.q === prefs.quality);
+  setText('q-now', prefs.quality === 'auto' ? `сейчас ${LEVEL_NAME[level]}` : '');
+}
+function showFps() {
+  const el = $('fps'); el.hidden = !prefs.fps;
+  if (prefs.fps) setText('fps', `${Math.round(perf.fps)} к/с · ${LEVEL_NAME[level]} · ×${dpr}`);
+}
 function adaptQuality(rawDt) {
   if (document.hidden || rawDt > 0.25) return;      // вкладка была свёрнута — не считаем
   perf.acc += rawDt; perf.n++;
   if (perf.acc < 1) return;
-  const avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0;
+  const avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0; perf.fps = 1 / avg;
   if (avg > 1 / 42) { perf.slow++; perf.fast = 0; } else if (avg < 1 / 56) { perf.fast++; perf.slow = 0; } else { perf.slow = 0; perf.fast = 0; }
   if (perf.slow >= 2 && dpr > QUALITY.minDpr) {
     perf.cap = Math.min(perf.cap, dpr);              // выше этого уровня больше не поднимаемся без долгого запаса
     dpr = Math.max(QUALITY.minDpr, +(dpr - 0.25).toFixed(2)); perf.slow = 0; layoutDirty = true;
+  } else if (perf.slow >= 4 && prefs.quality === 'auto' && level !== 'low') {
+    setLevel(level === 'high' ? 'med' : 'low');      // плотность уже минимальная, а кадров мало: снимаем эффекты
   } else if (perf.fast >= 8 && dpr < perf.cap - 0.01) {
     dpr = Math.min(perf.cap, +(dpr + 0.25).toFixed(2)); perf.fast = 0; layoutDirty = true;
   }
+  if (prefs.fps) showFps();
 }
+$('q-seg').addEventListener('click', (e) => {
+  const q = e.target.dataset && e.target.dataset.q; if (!q) return;
+  prefs.quality = q; savePrefs(); setLevel(q === 'auto' ? autoLevel : q);
+});
+$('showFps').checked = prefs.fps;
+$('showFps').addEventListener('change', (e) => { prefs.fps = e.target.checked; savePrefs(); showFps(); });
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
 
 let mapAcc = 1, physAcc = 0, lastGybeSeen = -1;
@@ -658,6 +698,7 @@ function frame() {
   renderer.render(scene, camera);
 }
 
+showQuality(); showFps();
 frame();
 requestAnimationFrame(() => $('loading').classList.add('hide'));
 initAnalytics();

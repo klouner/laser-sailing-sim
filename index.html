@@ -10,7 +10,7 @@
 <meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=39">
+<link rel="stylesheet" href="style.css?v=40">
 <script type="importmap">
 {
   "imports": {
@@ -24,6 +24,7 @@
 <div id="app">
   <canvas id="scene"></canvas>
 
+  <div id="fps" class="fps" hidden></div>
   <header id="topbar">
     <div class="brand">
       <span class="logo">&gt;&gt;&gt;</span>
@@ -145,6 +146,14 @@
         <label><input type="checkbox" id="showStreaks" checked> Струи ветра</label>
         <label><input type="checkbox" id="showLabels" checked> Подписи у стрелок</label>
         <label><input type="checkbox" id="showSailor" checked> Матрос</label>
+        <label><input type="checkbox" id="showFps"> Счётчик кадров</label>
+      </div>
+      <div class="row-head"><span>Качество графики</span><small id="q-now"></small></div>
+      <div class="seg" id="q-seg">
+        <button data-q="auto" class="active">Авто</button>
+        <button data-q="low">Низкое</button>
+        <button data-q="med">Среднее</button>
+        <button data-q="high">Высокое</button>
       </div>
     </section>
 
@@ -222,6 +231,6 @@
 
   <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
 </div>
-<script type="module" src="js/main.js?v=39"></script>
+<script type="module" src="js/main.js?v=40"></script>
 </body>
 </html>
