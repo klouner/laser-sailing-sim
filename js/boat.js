@@ -306,6 +306,7 @@ const TORSO_RINGS = [
 const ARM_SPEC = { rad: [[0, 0.060], [1, 0.047], [1.9, 0.036], [2.3, 0.045], [3, 0.036]], split: 1.93, a: 'top', b: 'glove', f1: 0.07, f2: 0.02 };
 const LEG_SPEC = { rad: [[0, 0.092], [1, 0.066], [1.92, 0.047], [2.25, 0.053], [3, 0.046]], split: 1.82, a: 'pants', b: 'boot', f1: 0.09, f2: 0.045 };
 const LIMB_RINGS = 3 + 2 + 5 + 2 + 4 + 2 + 2;
+const NECK_T = 0.47;       // выше этой отметки торса начинается шея
 function makeBody(colors) {
   const S = BODY_SIDES, nRings = TORSO_RINGS.length + 4 * LIMB_RINGS, nV = nRings * S;
   const pos = new Float32Array(nV * 3), col = new Float32Array(nV * 3), idx = [];
@@ -384,9 +385,14 @@ function makeBody(colors) {
     limbRing(c0.copy(p3).addScaledVector(d3, re * 0.75), d3, 3, spec, false, 0.03);
   }
   // торс: жёсткий, вдоль dir от таза; ax — линия плеч
-  function torso(hip, dir, ax, hide) {
+  // neck — куда идёт шея от плеч: голова может быть поднята относительно линии корпуса
+  function torso(hip, dir, ax, hide, neck = dir) {
     N.copy(ax).addScaledVector(dir, -ax.dot(dir)).normalize(); B.crossVectors(dir, N);
-    for (const [t, a, b, c] of TORSO_RINGS) put(tmp.copy(hip).addScaledVector(dir, hide ? 0 : t), N, B, hide ? 0.0005 : a, hide ? 0.0005 : b, C[c]);
+    for (const [t, a, b, c] of TORSO_RINGS) {
+      tmp.copy(hip).addScaledVector(dir, hide ? 0 : Math.min(t, NECK_T));
+      if (!hide && t > NECK_T) tmp.addScaledVector(neck, t - NECK_T);
+      put(tmp, N, B, hide ? 0.0005 : a, hide ? 0.0005 : b, C[c]);
+    }
   }
   return {
     mesh, torso, limb,
@@ -758,7 +764,7 @@ export function createBoat(env0 = null) {
   let flutterPhase = 0;
   const sheetState = { slack: 0, ease: 0 };
   const P = {
-    hip: new THREE.Vector3(), ax: new THREE.Vector3(1, 0, 0), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
+    hip: new THREE.Vector3(), ax: new THREE.Vector3(1, 0, 0), neck: new THREE.Vector3(0, 1, 0), aim: new THREE.Vector3(), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
     elbowA: new THREE.Vector3(), handA: new THREE.Vector3(), elbowB: new THREE.Vector3(), handB: new THREE.Vector3(), tmp: new THREE.Vector3(),
   };
 
@@ -831,7 +837,7 @@ export function createBoat(env0 = null) {
   //  • галфвинд/бакштаг — сидит на наветренном борту, при глиссировании смещается в корму
   //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
   //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
-  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0, sgn: 0, flip: 0 };
+  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0, sgn: 0, flip: 0, swap: 1 };
   // временные векторы кадра: берутся из пула, память в кадре не выделяется
   const pool = []; let poolI = 0;
   const tv = () => pool[poolI++] || (pool[poolI - 1] = new THREE.Vector3());
@@ -855,7 +861,7 @@ export function createBoat(env0 = null) {
     let wantSide = SS.sgn || state.side || 1;
     if (ay > 0.18) wantSide = Math.sign(state.crewY); else if (ay < 0.06) wantSide = state.side || wantSide;
     if (!SS.sgn) SS.sgn = wantSide;
-    if (wantSide !== SS.sgn) { SS.flip += dt; if (SS.flip > 0.3) { SS.sgn = wantSide; SS.flip = 0; } } else SS.flip = 0;
+    if (wantSide !== SS.sgn) { SS.flip += dt; if (SS.flip > 0.3) { SS.sgn = wantSide; SS.flip = 0; SS.swap = 0; } } else SS.flip = 0;
     SS.x += (tx - SS.x) * k; SS.theta += (ttheta - SS.theta) * Math.min(1, dt * 8);
     const dyS = (SS.sgn * seat - SS.y) * Math.min(1, dt * 14), maxS = 1.7 * dt;   // переход на другой борт занимает около полсекунды
     SS.y += Math.max(-maxS, Math.min(maxS, dyS));
@@ -871,14 +877,20 @@ export function createBoat(env0 = null) {
     const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
     const dir = P.tmp.set(-0.06 + 1.5 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
-    P.headP.copy(P.hip).addScaledVector(dir, 0.655); P.headP.x += 0.03; P.headP.y -= 0.03 * crouch; P.headP.z -= sv * 0.03;
-    // линия плеч: сидя — вдоль лодки, при переходе — поперёк (передняя рука со стороны нового борта)
-    const ax = P.ax.set(1 - crouch, 0, crouch * SS.sgn).normalize();
+    // Шея: когда корпус лежит за бортом или наклонён вперёд при переходе, голова не продолжает линию спины,
+    // а поднята: матрос смотрит вперёд, на нос и парус.
+    const lift = Math.max(h * (1 - crouch), crouch);
+    const neck = P.neck.copy(dir); neck.x += (0.2 * h - 0.25 * crouch) * lift; neck.y += 0.85 * lift; neck.z -= sv * 0.3 * h * (1 - crouch); neck.normalize();
+    P.headP.copy(P.hip).addScaledVector(dir, NECK_T).addScaledVector(neck, 0.655 - NECK_T); P.headP.x += 0.03; P.headP.z -= sv * 0.03 * (1 - h);
+    // Линия плеч: сидя — вдоль лодки, при переходе — поперёк. Матрос поворачивается лицом к носу: плечо руки,
+    // державшей румпель, идёт к новому борту. За серединой лодки эта рука уже считается передней.
+    const before = SS.y * SS.sgn < 0, cAx = 1 - Math.abs(sv);
+    const ax = P.ax.set(1 - cAx, 0, (before ? -1 : 1) * cAx * SS.sgn).normalize();
     body.begin();
-    body.torso(P.hip, dir, ax, firstPerson);
-    // голова: смотрит вперёд, при откренивании — вверх на парус
+    body.torso(P.hip, dir, ax, firstPerson, neck);
+    // голова смотрит вперёд, при откренивании чуть выше, на парус
     headG.position.copy(P.headP);
-    headG.rotation.set(0, sv * 0.35 * (1 - h * 0.4), 0.1 + 0.3 * h);
+    headG.rotation.set(0, sv * 0.35 * (1 - h * 0.4), 0.1 + 0.14 * h);
     // плечи
     const shA = tv().copy(P.shoulder).addScaledVector(ax, -0.165); shA.y -= 0.02; shA.z += sv * 0.02;      // заднее
     const shB = tv().copy(P.shoulder).addScaledVector(ax, 0.165); shB.y -= 0.02; shB.z += sv * 0.02;       // переднее
@@ -887,7 +899,7 @@ export function createBoat(env0 = null) {
     const toeA = 0.5 * (1 - crouch), toeS = sv >= 0 ? -1 : 1;   // носок вверх и к середине лодки, под ремень
     const half = cockpitHalfWidth(SS.x) - 0.1;
     for (const off of [0.12, -0.12]) {
-      const leg = Math.sign(off) * SS.sgn;                        // при переходе: передняя нога встаёт к новому борту, задняя остаётся у старого
+      const leg = Math.sign(off) * (before ? -1 : 1) * SS.sgn;    // при переходе ноги расставлены поперёк: каждая со своей стороны таза
       const poleLeg = tv().set(0.6 * crouch, 1 - 0.45 * crouch, sv * 0.25 * (1 - crouch) + leg * 1.1 * crouch);
       const hipJ = tv().copy(P.hip).addScaledVector(ax, off * 0.85); hipJ.y -= 0.03; hipJ.z -= sv * 0.07;
       const ftZ = THREE.MathUtils.clamp(lateral - sv * 0.62, -0.13, 0.13) - sv * 0.02 * (1 - crouch);
@@ -903,22 +915,54 @@ export function createBoat(env0 = null) {
     // руки: кисть не дальше вытянутой руки
     const REACH = ARM1 + ARM2 - 0.02;
     const run = twa >= 150;
-    // Задняя рука держит удлинитель румпеля перед собой, у живота: удлинитель идёт от румпеля наискось перед корпусом,
-    // а не за спиной. Кисть скользит по удлинителю. За спину он уходит только на время перехода на другой борт.
+    const sm = (e0, e1, x) => { const q = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return q * q * (3 - 2 * q); };
     const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(tv()));
+    // Обычный хват: задняя рука держит удлинитель румпеля перед собой, у живота, удлинитель идёт наискось перед корпусом.
     const fn = Math.sin(theta), fc = Math.cos(theta);            // «перед» корпуса: сидя — к середине лодки, вися за бортом — вверх
-    const wantA = tv().copy(P.hip).addScaledVector(dir, 0.2);
-    wantA.x -= 0.16; wantA.y += 0.2 * Math.max(0, fn) + 0.04; wantA.z -= sv * 0.29 * fc;
-    wantA.lerp(tv().set(SS.x - 0.3, dy + 0.34, lateral - SS.sgn * 0.34), crouch);
-    const toWant = tv().copy(wantA).sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
-    P.handA.copy(pivotHull).addScaledVector(toWant, THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN));
-    clampReach(shA, P.handA, REACH);
+    const frontT = tv().copy(P.hip).addScaledVector(dir, 0.2);
+    frontT.x -= 0.16; frontT.y += 0.2 * Math.max(0, fn) + 0.04; frontT.z -= sv * 0.29 * fc;
     // передняя рука: шкот; на фордевинде — участок шкота от блока к гику
-    if (run) { const bm = tv().copy(boomBlockMid).applyAxisAngle(Y, rig.rotation.y).add(mastBase); P.handB.copy(blockTop).lerp(bm, 0.3); }
-    else P.handB.set(SS.x + 0.35, dy + 0.36 - 0.1 * h - 0.1 * crouch, lateral - sv * 0.05 + sv * 0.1 * h);
-    clampReach(shB, P.handB, REACH);
-    solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-1, -0.6, -sv * 0.15 * (1 - crouch) - SS.sgn * 0.8 * crouch), P.elbowA);
-    solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2, -1, sv * 0.3), P.elbowB);
+    const sheetN = tv();
+    if (run) { const bm = tv().copy(boomBlockMid).applyAxisAngle(Y, rig.rotation.y).add(mastBase); sheetN.copy(blockTop).lerp(bm, 0.3); }
+    else sheetN.set(SS.x + 0.35, dy + 0.36 - 0.1 * h, lateral - sv * 0.05 + sv * 0.1 * h);
+    // При переходе: удлинитель за спиной, со стороны нового борта; шкот в другой руке впереди.
+    const crossT = tv().set(SS.x - 0.28, P.hip.y + 0.2, lateral + SS.sgn * 0.25);
+    const crossS = tv().set(SS.x + 0.35, dy + 0.3, lateral - SS.sgn * 0.15);
+    // Сев на новый борт, матрос ещё держит удлинитель за спиной передней рукой, а шкот — задней перед собой.
+    const behind = tv().set(SS.x + 0.02, P.hip.y + 0.15, lateral + sv * 0.25).lerp(crossT, cAx);
+    const sheetA = tv().set(SS.x - 0.02, dy + 0.34, lateral - sv * 0.24).lerp(crossS, cAx);
+    // Перехват: задняя рука со шкотом тянется за спину и берёт удлинитель, передняя отпускает его и забирает шкот,
+    // затем задняя рука проносит удлинитель над плечом вперёд.
+    if (!before && SS.swap < 1 && cAx < 0.25) SS.swap = Math.min(1, SS.swap + dt / 1.25);
+    const sw = before ? 1 : SS.swap;
+    const aim = P.aim, sheetEnd = tv();
+    let holdA = true, poleBack = 0;
+    if (before) {                                   // уходит со старого борта: румпель ещё в задней руке
+      aim.copy(frontT).lerp(crossT, cAx); P.handB.copy(sheetN).lerp(crossS, cAx); sheetEnd.copy(P.handB);
+    } else if (sw < 1) {
+      const over = tv().set(SS.x - 0.36, P.hip.y + 0.78, lateral + sv * 0.08);     // над задним плечом: удлинитель встаёт торчком
+      const g = sm(0.45, 1, sw), g1 = 1 - g;
+      if (sw < 0.45) aim.copy(behind);
+      else aim.set(g1 * g1 * behind.x + 2 * g1 * g * over.x + g * g * frontT.x, g1 * g1 * behind.y + 2 * g1 * g * over.y + g * g * frontT.y, g1 * g1 * behind.z + 2 * g1 * g * over.z + g * g * frontT.z);
+      holdA = sw >= 0.34;
+      sheetEnd.copy(sheetA).lerp(sheetN, sm(0.08, 0.5, sw));
+      poleBack = sm(0.05, 0.3, sw) * (1 - sm(0.7, 1, sw));
+    } else { aim.copy(frontT); P.handB.copy(sheetN); sheetEnd.copy(sheetN); }
+    const toWant = tv().copy(aim).sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
+    const gripD = THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN);
+    const grip = tv().copy(pivotHull).addScaledVector(toWant, gripD);
+    if (before || sw >= 1) P.handA.copy(grip);
+    else {
+      // задняя рука идёт от шкота к удлинителю (берётся чуть ближе к румпелю, чем передняя), потом ведёт его сама
+      const gripAft = tv().copy(pivotHull).addScaledVector(toWant, Math.max(0.3, gripD - 0.2));
+      if (holdA) P.handA.copy(gripAft).lerp(grip, sm(0.34, 0.5, sw)); else P.handA.copy(sheetA).lerp(gripAft, sm(0.08, 0.34, sw));
+      P.handB.copy(grip).lerp(sheetN, sm(0.34, 0.58, sw));
+    }
+    clampReach(shA, P.handA, REACH); clampReach(shB, P.handB, REACH);
+    // локти: обычно вниз; у руки, заведённой за спину, — наружу
+    const backB = before ? 0 : (sw < 1 ? 1 - sm(0.34, 0.6, sw) : 0), outS = cAx > 0.5 ? SS.sgn : sv;
+    solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-1 + 0.5 * poleBack, -0.6 + 0.3 * poleBack, -sv * 0.15 * (1 - cAx) + outS * (0.9 * poleBack + (before ? 0.8 * cAx : 0))), P.elbowA);
+    solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2 + 0.1 * backB, -1 + 0.6 * backB, sv * 0.3 + outS * 0.9 * backB), P.elbowB);
     for (const [sh, el, hd] of [[shA, P.elbowA, P.handA], [shB, P.elbowB, P.handB]]) {
       const fd = tv().subVectors(hd, el).normalize();
       body.limb(sh, el, tv().copy(hd).addScaledVector(fd, -0.05), tv().copy(hd).addScaledVector(fd, 0.06), ARM_SPEC, ax, firstPerson ? 0.45 : -1);
@@ -931,7 +975,7 @@ export function createBoat(env0 = null) {
     extension.scale.y = EXT_LEN / 1.1; extension.position.x = EXT_LEN / 2; extGrip.position.x = EXT_LEN - 0.1;
 
     // шкот от блока в переднюю руку
-    const handPt = handPts[1].copy(P.handB); handPt.y -= 0.03; handPts[0].copy(blockTop);
+    const handPt = handPts[1].copy(sheetEnd); handPt.y -= 0.03; handPts[0].copy(blockTop);
     const midY = (blockTop.y + handPt.y) / 2;
     const wantSag = run ? 0.02 : 0.03 + 0.1 * sheetState.ease + 0.12 * sheetState.slack;
     const sag = Math.min(wantSag, midY - (floorY + 0.05));
