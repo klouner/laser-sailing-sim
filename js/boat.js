@@ -758,7 +758,7 @@ export function createBoat(env0 = null) {
   let flutterPhase = 0;
   const sheetState = { slack: 0, ease: 0 };
   const P = {
-    hip: new THREE.Vector3(), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
+    hip: new THREE.Vector3(), ax: new THREE.Vector3(1, 0, 0), shoulder: new THREE.Vector3(), headP: new THREE.Vector3(), knee: new THREE.Vector3(), foot: new THREE.Vector3(),
     elbowA: new THREE.Vector3(), handA: new THREE.Vector3(), elbowB: new THREE.Vector3(), handB: new THREE.Vector3(), tmp: new THREE.Vector3(),
   };
 
@@ -852,49 +852,59 @@ export function createBoat(env0 = null) {
     if (!SS.sgn) SS.sgn = wantSide;
     if (wantSide !== SS.sgn) { SS.flip += dt; if (SS.flip > 0.3) { SS.sgn = wantSide; SS.flip = 0; } } else SS.flip = 0;
     SS.x += (tx - SS.x) * k; SS.theta += (ttheta - SS.theta) * Math.min(1, dt * 8);
-    const dyS = (SS.sgn * seat - SS.y) * Math.min(1, dt * 14), maxS = 2.4 * dt;
+    const dyS = (SS.sgn * seat - SS.y) * Math.min(1, dt * 14), maxS = 1.7 * dt;   // переход на другой борт занимает около полсекунды
     SS.y += Math.max(-maxS, Math.min(maxS, dyS));
-    const sv = THREE.MathUtils.clamp(SS.y / 0.3, -1, 1);          // куда наклонён корпус; у диаметральной плоскости — прямо
-    SS.crouch += ((1 - Math.abs(sv)) - SS.crouch) * Math.min(1, dt * 8);
+    const sv = THREE.MathUtils.clamp(SS.y / (edge * 0.85), -1, 1);  // на каком борту сидит; при переходе плавно проходит через ноль
+    SS.crouch += ((1 - Math.abs(sv)) - SS.crouch) * Math.min(1, dt * 12);
     const h = Math.min(1, Math.max(0, (SS.theta - 0.38) / 1.07)); // степень откренивания 0..1
     const dy = deckAt(SS.x);
     const lateral = SS.y;
     const crouch = SS.crouch;
-    // таз: на борту, при переходе — низко над кокпитом
-    P.hip.set(SS.x, dy + 0.07 - 0.13 * crouch, lateral);
+    // Переход на другой борт: матрос разворачивается лицом к носу, пригибается под гик и проходит через кокпит
+    // на согнутых ногах, колени в стороны. Рука с удлинителем румпеля остаётся позади, со стороны старого борта.
+    P.hip.set(SS.x, dy + 0.07 - 0.03 * crouch, lateral);
     const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
-    const dir = P.tmp.set(-0.06 + 0.3 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
+    const dir = P.tmp.set(-0.06 + 1.5 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
     P.headP.copy(P.hip).addScaledVector(dir, 0.655); P.headP.x += 0.03; P.headP.y -= 0.03 * crouch; P.headP.z -= sv * 0.03;
+    // линия плеч: сидя — вдоль лодки, при переходе — поперёк (передняя рука со стороны нового борта)
+    const ax = P.ax.set(1 - crouch, 0, crouch * SS.sgn).normalize();
     body.begin();
-    body.torso(P.hip, dir, _xAxis, firstPerson);
+    body.torso(P.hip, dir, ax, firstPerson);
     // голова: смотрит вперёд, при откренивании — вверх на парус
     headG.position.copy(P.headP);
     headG.rotation.set(0, sv * 0.35 * (1 - h * 0.4), 0.1 + 0.3 * h);
     // плечи
-    const shA = tv().copy(P.shoulder); shA.x -= 0.165; shA.y -= 0.02; shA.z += sv * 0.02;      // заднее
-    const shB = tv().copy(P.shoulder); shB.x += 0.165; shB.y -= 0.02; shB.z += sv * 0.02;      // переднее
+    const shA = tv().copy(P.shoulder).addScaledVector(ax, -0.165); shA.y -= 0.02; shA.z += sv * 0.02;      // заднее
+    const shB = tv().copy(P.shoulder).addScaledVector(ax, 0.165); shB.y -= 0.02; shB.z += sv * 0.02;       // переднее
     // ноги: двухзвенная кинематика. Стопы под ремнём откренивания, колено сгибается вверх;
     // чем дальше матрос вывешивается, тем прямее ноги.
-    const poleLeg = tv().set(0.25 * crouch, 1, sv * 0.25);
     const toeA = 0.5 * (1 - crouch), toeS = sv >= 0 ? -1 : 1;   // носок вверх и к середине лодки, под ремень
+    const half = cockpitHalfWidth(SS.x) - 0.1;
     for (const off of [0.12, -0.12]) {
-      const hipJ = tv().copy(P.hip); hipJ.x += off * 0.85; hipJ.y -= 0.03; hipJ.z -= sv * 0.07;
-      const ft = tv().set(SS.x + off * 1.25 + 0.05, floorY + 0.075, THREE.MathUtils.clamp(lateral - sv * 0.62, -0.13, 0.13) - sv * 0.02 * (1 - crouch));
+      const leg = Math.sign(off) * SS.sgn;                        // при переходе: передняя нога встаёт к новому борту, задняя остаётся у старого
+      const poleLeg = tv().set(0.6 * crouch, 1 - 0.45 * crouch, sv * 0.25 * (1 - crouch) + leg * 1.1 * crouch);
+      const hipJ = tv().copy(P.hip).addScaledVector(ax, off * 0.85); hipJ.y -= 0.03; hipJ.z -= sv * 0.07;
+      const ftZ = THREE.MathUtils.clamp(lateral - sv * 0.62, -0.13, 0.13) - sv * 0.02 * (1 - crouch);
+      const ft = tv().set(SS.x + off * 1.25 * (1 - crouch) + 0.05 + 0.08 * crouch, floorY + 0.075, ftZ * (1 - crouch) + THREE.MathUtils.clamp(lateral + leg * 0.3, -half, half) * crouch);
       clampReach(hipJ, ft, THIGH + SHIN - 0.015);
       solveElbow(hipJ, ft, THIGH, SHIN, poleLeg, P.knee);
       // колено не ниже палубы: бедро лежит на борту
       const deckK = deckAt(P.knee.x) + (cockpitSDF(P.knee.x, P.knee.z) < 0 ? -COCKPIT.depth : 0) + 0.085;
       if (P.knee.y < deckK) P.knee.y = deckK;
-      const toe = tv().set(ft.x, ft.y + Math.sin(toeA) * 0.19, ft.z + toeS * Math.cos(toeA) * 0.19);
+      const toe = tv().set(ft.x + 0.19 * crouch, ft.y + Math.sin(toeA) * 0.19 * (1 - crouch), ft.z + toeS * Math.cos(toeA) * 0.19 * (1 - crouch));
       body.limb(hipJ, P.knee, ft, toe, LEG_SPEC, poleLeg);
     }
     // руки: кисть не дальше вытянутой руки
     const REACH = ARM1 + ARM2 - 0.02;
     const run = twa >= 150;
-    // задняя рука держит удлинитель румпеля сбоку-сзади от таза, снаружи торса; кисть скользит по удлинителю
+    // Задняя рука держит удлинитель румпеля перед собой, у живота: удлинитель идёт от румпеля наискось перед корпусом,
+    // а не за спиной. Кисть скользит по удлинителю. За спину он уходит только на время перехода на другой борт.
     const pivotHull = heelG.worldToLocal(extPivot.getWorldPosition(tv()));
-    const wantA = tv().set(SS.x - 0.2, dy + 0.3 - 0.06 * crouch, lateral + sv * 0.27 * (1 - crouch) + sv * 0.12 * crouch);
+    const fn = Math.sin(theta), fc = Math.cos(theta);            // «перед» корпуса: сидя — к середине лодки, вися за бортом — вверх
+    const wantA = tv().copy(P.hip).addScaledVector(dir, 0.2);
+    wantA.x -= 0.16; wantA.y += 0.2 * Math.max(0, fn) + 0.04; wantA.z -= sv * 0.29 * fc;
+    wantA.lerp(tv().set(SS.x - 0.3, dy + 0.34, lateral - SS.sgn * 0.34), crouch);
     const toWant = tv().copy(wantA).sub(pivotHull); const distWant = toWant.length(); toWant.normalize();
     P.handA.copy(pivotHull).addScaledVector(toWant, THREE.MathUtils.clamp(distWant, 0.35, EXT_LEN));
     clampReach(shA, P.handA, REACH);
@@ -902,11 +912,11 @@ export function createBoat(env0 = null) {
     if (run) { const bm = tv().copy(boomBlockMid).applyAxisAngle(Y, rig.rotation.y).add(mastBase); P.handB.copy(blockTop).lerp(bm, 0.3); }
     else P.handB.set(SS.x + 0.35, dy + 0.36 - 0.1 * h - 0.1 * crouch, lateral - sv * 0.05 + sv * 0.1 * h);
     clampReach(shB, P.handB, REACH);
-    solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-0.4, -1, sv * 0.6), P.elbowA);
+    solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-1, -0.6, -sv * 0.15 * (1 - crouch) - SS.sgn * 0.8 * crouch), P.elbowA);
     solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2, -1, sv * 0.3), P.elbowB);
     for (const [sh, el, hd] of [[shA, P.elbowA, P.handA], [shB, P.elbowB, P.handB]]) {
       const fd = tv().subVectors(hd, el).normalize();
-      body.limb(sh, el, tv().copy(hd).addScaledVector(fd, -0.05), tv().copy(hd).addScaledVector(fd, 0.06), ARM_SPEC, _xAxis, firstPerson ? 0.45 : -1);
+      body.limb(sh, el, tv().copy(hd).addScaledVector(fd, -0.05), tv().copy(hd).addScaledVector(fd, 0.06), ARM_SPEC, ax, firstPerson ? 0.45 : -1);
     }
     body.end();
     // удлинитель румпеля направлен на точку хвата, длина постоянная
@@ -970,12 +980,13 @@ export function createBoat(env0 = null) {
     board.position.y = trunkTop + 0.28 - 0.725 + 0.725 + (1 - state.board) * 0.6; boardTop.position.y = trunkTop + 0.29 + (1 - state.board) * 0.6; handle.position.y = trunkTop + 0.34 + (1 - state.board) * 0.6;
     sheetState.ease += (out.sheet / 90 - sheetState.ease) * Math.min(1, dt * 3);
     sailor.visible = sailorEnabled && !out.capsized; handSheet.mesh.visible = sailor.visible;
-    if (sailor.visible) updateSailor(state, dt, out);
+    if (sailor.visible) updateSailor(state, api.holdPose ? 0 : dt, out);
   }
 
   let sailorEnabled = true;
   const headWorld = (v) => headG.getWorldPosition(v);
   // вид из глаз: голова и корпус матроса скрыты, руки и ноги остаются в кадре
   const setHead = (v) => { headG.visible = v; firstPerson = !v; };
-  return { root, heelG, rig, sea, headWorld, setHead, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
+  const api = { holdPose: false, pose: SS, root, heelG, rig, sea, headWorld, setHead, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
+  return api;
 }
