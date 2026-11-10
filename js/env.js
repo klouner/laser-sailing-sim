@@ -22,7 +22,7 @@ const SHIFTS = [{ L: 210, dir: 50, a: 0.6 }, { L: 130, dir: 150, a: 0.4 }];
 
 export const WAVE_GLSL = /* glsl */`
 uniform vec2 uWaveDir[4]; uniform float uWaveK[4]; uniform float uWaveAmp[4]; uniform float uWavePhase[4]; uniform vec2 uWaveFade[4];
-uniform vec2 uPivot; uniform float uAmpTotal;
+uniform vec2 uPivot; uniform float uAmpTotal; uniform float uSharp;
 uniform vec2 uBoatFwd; uniform vec3 uBoatPlane; uniform float uBoatMask;
 // высота волны и её уклон в мировой точке p (xz). Под корпусом вода прижимается к плоскости лодки.
 vec3 waveHG(vec2 p) {
@@ -31,8 +31,10 @@ vec3 waveHG(vec2 p) {
   for (int i = 0; i < 4; i++) {
     float f = 1.0 - smoothstep(uWaveFade[i].x, uWaveFade[i].y, d);
     float ph = uWaveK[i] * dot(uWaveDir[i], r) + uWavePhase[i];
-    h += f * uWaveAmp[i] * sin(ph);
-    g += f * uWaveAmp[i] * uWaveK[i] * cos(ph) * uWaveDir[i];
+    // профиль волны: в свежий ветер гребни острее, ложбины площе (uSharp = 0 — чистая синусоида)
+    float u = 0.5 + 0.5 * sin(ph), um = pow(max(u, 1e-4), uSharp);
+    h += f * uWaveAmp[i] * (2.0 * um * u - 1.0 + 0.25 * uSharp);
+    g += f * uWaveAmp[i] * uWaveK[i] * (1.0 + uSharp) * um * cos(ph) * uWaveDir[i];
   }
   float bf = dot(r, uBoatFwd), bs = dot(r, vec2(-uBoatFwd.y, uBoatFwd.x));
   float e = length(vec2(bf / 2.45, bs / 0.95));
@@ -51,7 +53,7 @@ export function createEnvironment() {
   const mkCell = (c) => ({ qx: Math.sin(c.dir * DEG) * TAU / c.L, qz: -Math.cos(c.dir * DEG) * TAU / c.L, a: c.a, phase: Math.random() * TAU });
   const gusts = GUSTS.map(mkCell), shifts = SHIFTS.map(mkCell);
   const env = {
-    pivotX: 0, pivotZ: 0, ampTotal: 0.05, waveAngle: null, whitecap: 0, gustOn: 0,
+    pivotX: 0, pivotZ: 0, ampTotal: 0.05, sharp: 0, waveAngle: null, whitecap: 0, gustOn: 0,
     gustSpeed: 0, gustDir: 0,       // порыв и заход ветра в точке лодки, −1..1
     boat: { fx: 0, fz: -1, heave: 0, sf: 0, ss: 0, mask: 1 },
   };
@@ -62,7 +64,7 @@ export function createEnvironment() {
     uWavePhase: { value: waves.map((w) => w.phase) },
     uWaveFade: { value: waves.map((w) => new THREE.Vector2(w.f0, w.f1)) },
     uPivot: { value: new THREE.Vector2() },
-    uAmpTotal: { value: 0.05 },
+    uAmpTotal: { value: 0.05 }, uSharp: { value: 0 }, uBoatWash: { value: 0 },
     uBoatFwd: { value: new THREE.Vector2(0, -1) }, uBoatPlane: { value: new THREE.Vector3() }, uBoatMask: { value: 1 },
     uGustQ: { value: gusts.map((g) => new THREE.Vector2(g.qx, g.qz)) },
     uGustAmp: { value: gusts.map((g) => g.a) },
@@ -77,7 +79,10 @@ export function createEnvironment() {
     for (const w of waves) {
       if (w.L < minL) continue;
       const f = 1 - smooth(w.f0, w.f1, d);
-      if (f > 0) h += f * w.amp * Math.sin(w.k * (w.dx * rx + w.dz * rz) + w.phase);
+      if (f > 0) {
+        const u = 0.5 + 0.5 * Math.sin(w.k * (w.dx * rx + w.dz * rz) + w.phase);
+        h += f * w.amp * (2 * Math.pow(Math.max(u, 1e-4), 1 + env.sharp) - 1 + 0.25 * env.sharp);
+      }
     }
     return h;
   };
@@ -100,6 +105,8 @@ export function createEnvironment() {
     const sea = Math.min(1, Math.max(0, (windKn - 3) / 20));
     const ampT = 0.018 + 0.21 * Math.pow(sea, 1.15);
     env.ampTotal += (ampT - env.ampTotal) * Math.min(1, dt * 0.25);
+    env.sharp += (0.9 * smooth(5, 17, windKn) - env.sharp) * Math.min(1, dt * 0.25);
+    U.uSharp.value = env.sharp;
     const step = paused ? 0 : dt;
     const wx = Math.sin(to), wz = -Math.cos(to), ws = windKn * 0.5144;   // скорость ветра, м/с
     waves.forEach((w, i) => {
@@ -122,6 +129,8 @@ export function createEnvironment() {
   env.setBoatPlane = (fx, fz, heave, slopeFwd, slopeStbd, mask = 1) => {
     U.uBoatFwd.value.set(fx, fz); U.uBoatPlane.value.set(heave, slopeFwd, slopeStbd); U.uBoatMask.value = mask;
   };
+  // пена у ватерлинии: 0 — лодка стоит, 1 — полный ход
+  env.setBoatWash = (v) => { U.uBoatWash.value = v; };
   return env;
 }
 
@@ -138,6 +147,27 @@ export function floatOnWaves(material, env, lift = 0.05) {
         transformed.y += waveHG(wpF.xz).x + uLift;`);
   };
   material.customProgramCacheKey = () => 'floatOnWaves';
+  return material;
+}
+// Подводная часть: всё, что ниже воды у лодки, уходит в цвет толщи тем сильнее, чем глубже.
+// Уровень воды берётся из плоскости лодки (к ней прижата нарисованная вода под корпусом).
+export function sinkInWater(material, env) {
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.uPivot = env.uniforms.uPivot; sh.uniforms.uBoatFwd = env.uniforms.uBoatFwd; sh.uniforms.uBoatPlane = env.uniforms.uBoatPlane;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSinkW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n vSinkW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSinkW; uniform vec2 uPivot; uniform vec2 uBoatFwd; uniform vec3 uBoatPlane;')
+      .replace('#include <opaque_fragment>', `{
+          vec2 rS = vSinkW.xz - uPivot; float bfS = dot(rS, uBoatFwd), bsS = dot(rS, vec2(-uBoatFwd.y, uBoatFwd.x));
+          float depth = uBoatPlane.x + uBoatPlane.y * bfS + uBoatPlane.z * bsS - vSinkW.y;
+          float k = 1.0 - exp(-max(depth, 0.0) * 2.6);
+          outgoingLight = mix(outgoingLight, vec3(0.010, 0.085, 0.150), k * 0.9);
+        }
+        #include <opaque_fragment>`);
+  };
+  material.customProgramCacheKey = () => 'sinkInWater';
   return material;
 }
 export { GUST_GLSL };

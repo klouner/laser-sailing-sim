@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { sinkInWater } from './env.js';
 
 const DEG = Math.PI / 180;
 const Y = new THREE.Vector3(0, 1, 0);
@@ -416,7 +417,7 @@ function solveElbow(root, end, L1, L2, pole, out) {
 }
 
 // ---------- сборка лодки ----------
-export function createBoat() {
+export function createBoat(env0 = null) {
   const root = new THREE.Group();
   const heelG = new THREE.Group();
   root.add(heelG);
@@ -427,6 +428,7 @@ export function createBoat() {
   const matAluDark = new THREE.MeshStandardMaterial({ color: '#5b6068', metalness: 0.85, roughness: 0.35 });
   const matDark = new THREE.MeshStandardMaterial({ color: '#23272e', roughness: 0.55 });
   const matFoil = new THREE.MeshPhysicalMaterial({ color: '#eef0f2', roughness: 0.3, clearcoat: 0.5 });
+  if (env0) { sinkInWater(matHull, env0); sinkInWater(matFoil, env0); }
   const matRope = new THREE.MeshStandardMaterial({ color: '#e5e9ef', roughness: 0.9 });
   const matRopeRed = new THREE.MeshStandardMaterial({ color: '#d94848', roughness: 0.9 });
   const matRopeBlue = new THREE.MeshStandardMaterial({ color: '#3b5fc0', roughness: 0.9 });
@@ -837,6 +839,7 @@ export function createBoat() {
       sea.heave += ((hB + hS + hR + hL + 2 * hC) / 6 - sea.heave) * kk;
       sea.sf += ((hB - hS) / 3.4 - sea.sf) * kk; sea.ss += ((hR - hL) / 1.0 - sea.ss) * kk;
       env.setBoatPlane(fx, fz, sea.heave, sea.sf, sea.ss, 1);
+      env.setBoatWash(out.capsized ? 0 : THREE.MathUtils.clamp((Math.abs(state.vf) - 0.4) / 3.2, 0, 1));
     }
     heelG.rotation.x = -state.heel * DEG - Math.atan(sea.ss) * 0.55;
     heelG.rotation.z = Math.atan(sea.sf) - Math.min(2.5, state.vf * 0.9) * DEG;   // на ходу лёгкий дифферент на корму
@@ -870,5 +873,5 @@ export function createBoat() {
   }
 
   let sailorEnabled = true;
-  return { root, heelG, rig, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
+  return { root, heelG, rig, sea, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
 }

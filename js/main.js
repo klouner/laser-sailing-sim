@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createBoat, HULL } from './boat.js';
-import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
+import { makeSky, makeShore, HAZE, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, makeSpray, makeBoatReflection, setLabelScale } from './scene.js';
 import { createState, defaultControls, step, settleRig, norm180, norm360, compassName, optimalSheet, KN, PHYS_DT, BOAT } from './physics.js';
 import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
@@ -43,7 +43,7 @@ renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#bfd8ee', 120, 520);
+scene.fog = new THREE.Fog(HAZE, 180, 1500);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(-8, 4.5, 6);
 
@@ -68,12 +68,13 @@ scene.add(new THREE.HemisphereLight('#bcd7f5', '#1b4a70', 0.9));
 // окружение для отражений (простая градиентная сцена)
 {
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const envScene = new THREE.Scene(); envScene.add(makeSky());
+  const envScene = new THREE.Scene(); envScene.add(makeSky(sunDir, true));
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
   pmrem.dispose();
 }
 
-const sky = makeSky(); scene.add(sky);
+const sky = makeSky(sunDir); scene.add(sky);
+const shore = makeShore(); scene.add(shore);
 const clouds = makeClouds(); scene.add(clouds);
 const env = createEnvironment();   // волны и порывы: общие для физики, качки и шейдеров
 const water = makeWater(env); scene.add(water);
@@ -85,7 +86,13 @@ water.renderOrder = 1;
 compass.traverse((o) => { if (o.isMesh || o.isLine || o.isLineSegments) o.renderOrder = 3; });
 streaks.renderOrder = 4;
 
-const boat = createBoat(); scene.add(boat.root);
+const boat = createBoat(env); scene.add(boat.root);
+const spray = makeSpray(env); scene.add(spray);
+// отражение рисует только лодку: она и свет помечены слоем 1
+let reflection = null;
+boat.root.traverse((o) => o.layers.enable(1));
+scene.traverse((o) => { if (o.isLight) o.layers.enable(1); });
+const sprayE = { x: 0, z: 0, fx: 0, fz: -1, sx: 1, sz: 0, vx: 0, vz: 0, wx: 0, wz: 0, heave: 0, sf: 0, speed: 0 };
 
 const arrows = {
   trueWind: new VectorArrow(scene, 'rgb(0,71,255)', 'Истинный ветер'),
@@ -447,7 +454,7 @@ function updateTraining(out, dt, t) {
   }
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { get level() { return level; }, prefs, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, boat, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -657,8 +664,14 @@ function simulate(dt) {
   streaks.visible = show.streaks;
   if (show.streaks) streaks.userData.update(ctl.paused ? 0 : dt, state.x, state.z, out.Wx, out.Wz, ctl.windSpeed);
   wake.userData.update(ctl.paused || out.capsized ? 0 : dt, state.x, state.z, out.fx, out.fz, out.sx, out.sz, state.vf);
+  if (fx.level >= 1) {
+    const e = sprayE; e.x = state.x; e.z = state.z; e.fx = out.fx; e.fz = out.fz; e.sx = out.sx; e.sz = out.sz; e.vx = out.Vx; e.vz = out.Vz;
+    e.wx = out.Wx; e.wz = out.Wz; e.heave = boat.sea.heave; e.sf = boat.sea.sf; e.speed = out.capsized ? 0 : Math.max(0, state.vf);
+    spray.userData.update(ctl.paused ? 0 : dt, e, canvas.height / (2 * Math.tan(camera.fov * DEG / 2)));
+  } else if (spray.visible) { spray.userData.clear(); spray.visible = false; }
   clouds.position.set(state.x, 0, state.z);
   sky.position.set(state.x, 0, state.z);
+  shore.position.set(state.x, 0, state.z);
   sun.position.copy(boat.root.position).addScaledVector(sunDir, 40);
   sun.target.position.copy(boat.root.position);
   return out;
@@ -695,6 +708,12 @@ function frame() {
   updateUI(out, dt);
   mapAcc += dt;
   if (hudVisible && mapAcc >= 0.05) { mapAcc = 0; drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.G1, color: '#0047ff', active: course.race.phase === 'leg2' }, { ...course.marks.G2, color: '#0047ff', active: course.race.phase === 'leg2' }] } : null); }
+  // отражение лодки в воде: только на высоком качестве
+  const WU = water.userData.uniforms;
+  if (fx.level >= 2) {
+    if (!reflection) { reflection = makeBoatReflection(isTouch ? 384 : 512); WU.tReflect.value = reflection.target.texture; WU.uReflectM.value = reflection.matrix; }
+    WU.uReflectOn.value = reflection.render(renderer, scene, camera, state.x, boat.sea.heave, state.z) ? 1 : 0;
+  } else WU.uReflectOn.value = 0;
   renderer.render(scene, camera);
 }
 

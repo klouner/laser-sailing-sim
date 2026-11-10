@@ -6,22 +6,65 @@ const DEG = Math.PI / 180;
 function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 // ---------- небо ----------
-export function makeSky() {
-  const geo = new THREE.SphereGeometry(900, 32, 16);
+// Цвет дымки у горизонта: тот же, что у тумана сцены, чтобы дальняя вода уходила в небо без шва.
+export const HAZE = '#d3e0ec';
+// Небо по мотивам рассеяния в атмосфере: тёмная синева в зените, светлеет и белеет к горизонту,
+// у солнца тёплый ореол, под 90° к солнцу небо глубже. Ниже горизонта — толща воды (видна сквозь воду).
+export function makeSky(sunDir, mirror = false) {
+  const geo = new THREE.SphereGeometry(900, 48, 24);
   const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false,
-    uniforms: { top: { value: new THREE.Color('#3f7fd6') }, mid: { value: new THREE.Color('#9fc7ef') }, bot: { value: new THREE.Color('#dfeaf3') }, sun: { value: new THREE.Vector3(0.4, 0.5, -0.7).normalize() } },
-    vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top, mid, bot, sun; varying vec3 vDir;
-      void main(){ float h = clamp(vDir.y, -0.1, 1.0);
-        vec3 c = h < 0.15 ? mix(bot, mid, smoothstep(-0.1,0.15,h)) : mix(mid, top, smoothstep(0.15,0.9,h));
-        float s = max(dot(normalize(vDir), sun), 0.0);
-        c += vec3(1.0,0.95,0.8) * pow(s, 400.0) * 1.5 + vec3(1.0,0.9,0.7) * pow(s, 12.0) * 0.25;
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { mirror: { value: mirror ? 1 : 0 }, sun: { value: sunDir.clone().normalize() }, haze: { value: new THREE.Color(HAZE).convertLinearToSRGB() } },
+    vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform vec3 sun, haze; uniform float mirror; varying vec3 vDir;
+      void main(){ vec3 d = normalize(vDir);
+        // для карты отражений нижняя полусфера повторяет верхнюю: пологая вода отражает небо у горизонта, а не «дно»
+        if (mirror > 0.5) d.y = abs(d.y) * 0.85 + 0.03;
+        float h = max(d.y, 0.0), mu = dot(d, sun), mp = max(mu, 0.0);
+        float g = pow(1.0 - h, 3.0);
+        vec3 c = mix(vec3(0.090, 0.275, 0.720), vec3(0.560, 0.755, 0.940), g);
+        c *= 0.88 + 0.13 * mu * mu;
+        c += vec3(1.0, 0.86, 0.66) * (0.10 * pow(mp, 6.0) + 0.20 * pow(mp, 48.0));
+        c = mix(c, haze + vec3(0.07, 0.035, 0.0) * pow(mp, 3.0), pow(1.0 - h, 11.0) * 0.86);
+        c += vec3(1.0, 0.97, 0.90) * smoothstep(0.99950, 0.99985, mu) * 2.0;
+        if (mirror < 0.5) c = mix(c, vec3(0.020, 0.105, 0.185), smoothstep(0.0, -0.05, d.y));
         // лёгкий шум против полос на плавном градиенте
         c += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 160.0;
         gl_FragColor = vec4(c, 1.0); }`
   });
   return new THREE.Mesh(geo, mat);
+}
+
+// ---------- дальний берег ----------
+// Полоса холмов на горизонте с одной стороны акватории. Стоит «в бесконечности»: едет вместе с лодкой.
+export function makeShore() {
+  const W = 2048, H = 64, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), rnd = rng(77);
+  const layer = (color, base, amp, rough, from, to) => {
+    const ph = [rnd() * 6, rnd() * 6, rnd() * 6, rnd() * 6];
+    g.fillStyle = color; g.beginPath(); g.moveTo(0, H);
+    for (let x = 0; x <= W; x += 2) {
+      const u = x / W, a = u * Math.PI * 2;
+      // берег занимает часть круга: к краям сектора холмы сходят в воду
+      const sect = Math.max(0, Math.min(1, (u - from) / 0.07)) * Math.max(0, Math.min(1, (to - u) / 0.07));
+      const s = sect * sect * (3 - 2 * sect);
+      const hh = base + amp * (0.5 + 0.28 * Math.sin(a * 5 + ph[0]) + 0.16 * Math.sin(a * 13 + ph[1]) + 0.08 * Math.sin(a * 31 + ph[2])) + rough * Math.sin(a * 190 + ph[3]) * Math.sin(a * 77 + ph[0]);
+      g.lineTo(x, H - Math.max(0, hh * s));
+    }
+    g.lineTo(W, H); g.closePath(); g.fill();
+  };
+  layer('rgba(150,176,198,0.95)', 5, 44, 0.0, 0.52, 0.98);     // дальние сопки в дымке
+  layer('rgba(112,146,160,0.97)', 3, 26, 0.6, 0.48, 0.90);     // ближняя гряда
+  layer('rgba(84,122,118,1.0)', 2, 13, 1.0, 0.56, 0.84);       // лес у воды
+  // у самой воды берег тонет в дымке
+  const fade = g.createLinearGradient(0, H - 7, 0, H); fade.addColorStop(0, 'rgba(211,224,236,0)'); fade.addColorStop(1, 'rgba(211,224,236,0.85)');
+  g.globalCompositeOperation = 'source-atop'; g.fillStyle = fade; g.fillRect(0, H - 7, W, 7);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = THREE.RepeatWrapping; tex.anisotropy = 4;
+  const R = 880, HT = 52;
+  const geo = new THREE.CylinderGeometry(R, R, HT, 96, 1, true); geo.translate(0, HT / 2 - 0.5, 0);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false }));
+  mesh.renderOrder = 2; mesh.frustumCulled = false;
+  return mesh;
 }
 
 // ---------- облака ----------
@@ -82,40 +125,50 @@ function makeWaterNormalMap() {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
   return tex;
 }
-// Сетка воды: густая у лодки (ячейка ~0.4 м), редкая вдали. Вдвое меньше треугольников, чем у равномерной.
-function buildWaterGeometry(R, N, a) {
-  const map = (u) => R * (a * u + (1 - a) * u * u * u);
-  const n1 = N + 1, pos = new Float32Array(n1 * n1 * 3), nor = new Float32Array(n1 * n1 * 3), uv = new Float32Array(n1 * n1 * 2);
-  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
-    const x = map(-1 + 2 * i / N), z = map(-1 + 2 * j / N), k = j * n1 + i;
-    pos[k * 3] = x; pos[k * 3 + 2] = z; nor[k * 3 + 1] = 1;
-    uv[k * 2] = x / (2 * R) + 0.5; uv[k * 2 + 1] = -z / (2 * R) + 0.5;
+// Сетка воды: густая у лодки (ячейка ~0.4 м), редкая вдали; внешние кольца уходят к горизонту.
+function buildWaterGeometry(R, N, a, RF, NO, tile) {
+  const half = N / 2 + NO, n1 = 2 * half + 1;
+  const coord = new Float32Array(n1);
+  for (let i = 0; i < n1; i++) {
+    const k = Math.abs(i - half), u = Math.min(1, k / (N / 2));
+    let x = R * (a * u + (1 - a) * u * u * u);
+    if (k > N / 2) x = R * Math.pow(RF / R, (k - N / 2) / NO);
+    coord[i] = i < half ? -x : x;
   }
-  const idx = new Uint16Array(N * N * 6); let o = 0;
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const pos = new Float32Array(n1 * n1 * 3), nor = new Float32Array(n1 * n1 * 3), uv = new Float32Array(n1 * n1 * 2);
+  for (let j = 0; j < n1; j++) for (let i = 0; i < n1; i++) {
+    const x = coord[i], z = coord[j], k = j * n1 + i;
+    pos[k * 3] = x; pos[k * 3 + 2] = z; nor[k * 3 + 1] = 1;
+    uv[k * 2] = x / tile; uv[k * 2 + 1] = -z / tile;
+  }
+  const M = n1 - 1, idx = new Uint16Array(M * M * 6); let o = 0;
+  for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) {
     const p = j * n1 + i, q = p + 1, r = p + n1, s = r + 1;
     idx[o++] = p; idx[o++] = r; idx[o++] = q; idx[o++] = q; idx[o++] = r; idx[o++] = s;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(new THREE.BufferAttribute(idx, 1));
-  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), R * 1.5);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), RF * 1.5);
   return g;
 }
 
 export function makeWater(env) {
-  const R = 300, SIZE = 2 * R, REPEAT = 90;
-  const geo = buildWaterGeometry(R, 128, 0.08);
+  const TILE = 6.667;
+  const geo = buildWaterGeometry(300, 128, 0.08, 1500, 8, TILE);
   const nmap = makeWaterNormalMap();
-  nmap.repeat.set(REPEAT, REPEAT);
   const mat = new THREE.MeshStandardMaterial({
-    color: '#1b5e8f', roughness: 0.26, metalness: 0.05, normalMap: nmap, normalScale: new THREE.Vector2(0.55, 0.55),
-    transparent: true, opacity: 0.94,
+    color: '#ffffff', roughness: 0.13, metalness: 0.0, normalMap: nmap, normalScale: new THREE.Vector2(0.6, 0.6), envMapIntensity: 1.9,
+    transparent: true, opacity: 1,
   });
+  const U = {
+    uDeep: { value: new THREE.Color('#0f4d78') }, uScatter: { value: new THREE.Color('#1f8f97') },
+    uRipple: { value: new THREE.Vector2() }, tReflect: { value: null }, uReflectM: { value: new THREE.Matrix4() }, uReflectOn: { value: 0 },
+  };
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, env.uniforms);
+    Object.assign(sh.uniforms, env.uniforms, U);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\n' + WAVE_GLSL + GUST_GLSL + '\nvarying float vWave; varying float vGust; varying vec2 vWXZ;')
+      .replace('#include <common>', '#include <common>\n' + WAVE_GLSL + GUST_GLSL + '\nuniform mat4 uReflectM; varying float vWave; varying float vGust; varying vec2 vWXZ; varying vec4 vRefl;')
       .replace('#include <beginnormal_vertex>', `
         vec3 wp0 = (modelMatrix * vec4(position, 1.0)).xyz;
         vec3 whg = waveHG(wp0.xz);
@@ -124,40 +177,182 @@ export function makeWater(env) {
           vec3 objectTangent = vec3(tangent.xyz);
         #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        transformed.y += whg.x; vWave = whg.x / uAmpTotal; vGust = gustV(wp0.xz); vWXZ = wp0.xz;`);
+        transformed.y += whg.x; vWave = whg.x / uAmpTotal; vGust = gustV(wp0.xz); vWXZ = wp0.xz;
+        vRefl = uReflectM * vec4(wp0.x, 0.0, wp0.z, 1.0);`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uGustOn; uniform float uWhitecap; varying float vWave; varying float vGust; varying vec2 vWXZ;')
+      .replace('#include <common>', `#include <common>
+        uniform float uGustOn, uWhitecap, uBoatWash, uReflectOn; uniform vec2 uPivot, uBoatFwd; uniform vec3 uDeep, uScatter; uniform sampler2D tReflect; uniform vec2 uRipple;
+        varying float vWave; varying float vGust; varying vec2 vWXZ; varying vec4 vRefl;
+        float gP, gL, foamE, fresW;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         // порыв (>0) — пятно тёмной ряби с заметной границей; затишье (<0) — светлее и глаже
-        float gP = smoothstep(0.12, 0.55, vGust) * uGustOn, gL = smoothstep(0.15, 0.6, -vGust) * uGustOn;
-        float gE = gP - gL;
-        // барашки: мелкие пятна пены на вершинах гребней
+        gP = smoothstep(0.12, 0.55, vGust) * uGustOn; gL = smoothstep(0.15, 0.6, -vGust) * uGustOn;
         // три слоя шума под разными углами и в разном масштабе, чтобы пятна пены не выстраивались в полосы
         vec2 q1 = vec2(vWXZ.x * 0.82 + vWXZ.y * 0.57, vWXZ.y * 0.82 - vWXZ.x * 0.57), q2 = vec2(vWXZ.x * 0.34 - vWXZ.y * 0.94, vWXZ.y * 0.34 + vWXZ.x * 0.94);
         float nA = texture2D(normalMap, q1 * 0.23).r, nB = texture2D(normalMap, q2 * 0.11 + 0.37).g, nC = texture2D(normalMap, vWXZ.yx * 0.47 + 0.11).g;
         float crest = smoothstep(0.25, 0.75, vWave);
         float nz = (nA - 0.5) * 0.48 + (nB - 0.5) * 0.40 + (nC - 0.5) * 0.12;      // шум около нуля, размах ~±0.08
-        float foamE = min(1.0, uWhitecap * 3.0) * smoothstep(0.90, 1.18, crest + nz * 6.0 - (1.0 - uWhitecap) * 0.55);
-        diffuseColor.rgb *= 1.0 - 0.36 * gP;
-        diffuseColor.rgb *= 1.0 + 0.14 * gL;
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.96, 0.98), foamE);`)
+        // барашки: мелкие пятна пены на вершинах гребней
+        foamE = min(1.0, uWhitecap * 3.0) * smoothstep(0.90, 1.18, crest + nz * 6.0 - (1.0 - uWhitecap) * 0.55);
+        // пена у ватерлинии: корпус режет воду, полоса шире и плотнее на ходу и у носа
+        vec2 rB = vWXZ - uPivot; float bf = dot(rB, uBoatFwd), bs = dot(rB, vec2(-uBoatFwd.y, uBoatFwd.x));
+        float hw = bf > -0.6 ? 0.66 * sqrt(max(0.0, 1.0 - pow(clamp((bf + 0.6) / 2.75, 0.0, 1.0), 2.2))) : 0.66 - 0.16 * pow((-0.6 - bf) / 1.5, 2.0);
+        float dH = max(abs(bs) - hw, max(-2.12 - bf, bf - 2.16));
+        float bowK = smoothstep(-0.6, 1.9, bf), washK = uBoatWash * (0.22 + 0.78 * bowK) * smoothstep(-2.3, -1.5, bf);
+        float band = 0.03 + 0.17 * washK;
+        float wl = smoothstep(-0.12, -0.01, dH) * (1.0 - smoothstep(band * 0.25, band, dH));
+        float nW = texture2D(normalMap, vWXZ * 1.3 + 0.3).r * 0.6 + nC * 0.4;
+        float foamW = wl * smoothstep(0.80 - 0.50 * washK, 0.92 - 0.42 * washK, nW + 0.30 * (1.0 - clamp(dH / band, 0.0, 1.0)));
+        foamE = max(foamE, foamW * 0.9);
+        // толща воды: отвесно — тёмная синева, гребни просвечивают бирюзой, сильнее против солнца
+        vec3 vdirW = normalize(vViewPosition);
+        float ndv = clamp(dot(normalize(vNormal), vdirW), 0.0, 1.0);
+        fresW = pow(1.0 - ndv, 4.0);
+        float sunBack = 0.5;
+        #if NUM_DIR_LIGHTS > 0
+          sunBack = clamp(0.35 + 0.65 * dot(-vdirW, directionalLights[0].direction), 0.0, 1.0);
+        #endif
+        float sss = smoothstep(0.55, 1.0, vWave) * (0.2 + 0.8 * sunBack) * smoothstep(0.03, 0.14, uAmpTotalF);
+        vec3 body = mix(uDeep, uScatter, clamp(0.05 + 0.22 * sss, 0.0, 1.0));
+        body *= 1.0 - 0.36 * gP; body *= 1.0 + 0.14 * gL;
+        diffuseColor.rgb = mix(body, vec3(0.93, 0.96, 0.98), foamE);
+        diffuseColor.a = clamp(mix(0.80, 0.99, fresW * 2.5) + foamE, 0.0, 1.0);`)
+      .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace(
+        'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;',
+        `vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+        // второй слой: мелкая рябь идёт под углом к крупной и быстрее — от неё блики рассыпаются искрами
+        vec2 uvD = vec2(vNormalMapUv.x * 0.80 - vNormalMapUv.y * 0.60, vNormalMapUv.x * 0.60 + vNormalMapUv.y * 0.80) * 4.3 + uRipple;
+        vec3 mapD = texture2D( normalMap, uvD ).xyz * 2.0 - 1.0;
+        mapN = normalize(vec3(mapN.xy + mapD.xy * (0.9 + 0.6 * gP - 0.4 * gL), mapN.z));`))
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = clamp(roughnessFactor + 0.30 * gP - 0.10 * gL + 0.6 * foamE, 0.04, 1.0);`)
-      // вода в основном отражает небо, поэтому пятно порыва затемняем уже после расчёта света
-      // солнечная дорожка: с настоящими уклонами волн блик стал широким — ограничиваем, чтобы не выгорал в белое
+        roughnessFactor = clamp(roughnessFactor + 0.30 * gP - 0.08 * gL + 0.6 * foamE, 0.04, 1.0);`)
+      // солнечная дорожка: с настоящими уклонами волн блик широкий — ограничиваем, чтобы не выгорал в белое
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
-        reflectedLight.directSpecular = min(reflectedLight.directSpecular * 0.35, vec3(0.55));`)
-      .replace('#include <opaque_fragment>', `outgoingLight *= (1.0 - 0.30 * gP * (1.0 - foamE)) * (1.0 + 0.10 * gL);
-        #include <opaque_fragment>`);
+        reflectedLight.directSpecular = min(reflectedLight.directSpecular * 0.22, vec3(0.9));`)
+      // вода в основном отражает небо, поэтому пятно порыва затемняем уже после расчёта света
+      .replace('#include <opaque_fragment>', `
+        // небо в ряби: грани, отвёрнутые от зрителя, светлеют. К горизонту вода уходит в цвет неба.
+        float sheen = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+        outgoingLight += vec3(0.26, 0.42, 0.62) * sheen * 0.5 * (1.0 - foamE);
+        outgoingLight *= (1.0 - 0.30 * gP * (1.0 - foamE)) * (1.0 + 0.10 * gL);
+        if (uReflectOn > 0.5) {
+          // отражение лодки: картинка из зеркальной камеры, смещённая рябью
+          // чем сильнее волнение, тем сильнее отражение рвётся рябью и тем оно слабее
+          float chop = smoothstep(0.02, 0.16, uAmpTotalF);
+          vec2 ruv = vRefl.xy / vRefl.w, rd = normal.xy * (0.05 + 0.10 * chop);
+          vec4 rc = 0.5 * (texture2D(tReflect, ruv + rd) + texture2D(tReflect, ruv + rd * vec2(-0.6, 1.7) + vec2(0.0, 0.004)));
+          outgoingLight = mix(outgoingLight, rc.rgb, rc.a * (0.20 + 0.55 * fresW) * (1.0 - 0.7 * chop) * (1.0 - foamE) * (1.0 - 0.5 * gP));
+        }
+        #include <opaque_fragment>`)
+      .replace('uniform float uGustOn, uWhitecap,', 'uniform float uAmpTotalF; uniform float uGustOn, uWhitecap,');
+    sh.uniforms.uAmpTotalF = env.uniforms.uAmpTotal;
   };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true; mesh.frustumCulled = false;
+  mesh.userData.uniforms = U;
   mesh.userData.update = (t, bx, bz, windDir) => {
     mesh.position.set(bx, 0, bz);
     const wx = Math.sin(windDir), wz = -Math.cos(windDir);
-    nmap.offset.set(bx / SIZE * REPEAT + wx * t * 0.045, -bz / SIZE * REPEAT - wz * t * 0.045);
+    nmap.offset.set(bx / TILE + wx * t * 0.045, -bz / TILE - wz * t * 0.045);
+    // мелкую рябь несёт ветром быстрее; сдвиг берётся по модулю, чтобы не терять точность
+    const k = t * 0.19; U.uRipple.value.set((wx * 0.8 + wz * 0.6) * k % 1, (-wz * 0.8 + wx * 0.6) * k % 1);
   };
   return mesh;
+}
+
+// ---------- брызги из-под носа ----------
+// Капли летят по баллистике, их сносит ветром. Больше всего брызг, когда нос врезается в волну на ходу.
+export function makeSpray(env, n = 420) {
+  const pos = new Float32Array(n * 3), aux = new Float32Array(n * 2), vel = new Float32Array(n * 3), life = new Float32Array(n), span = new Float32Array(n), size = new Float32Array(n);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('aux', new THREE.BufferAttribute(aux, 2));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: { uScale: { value: 600 } },
+    vertexShader: `attribute vec2 aux; uniform float uScale; varying float vA;
+      void main(){ vA = aux.x; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = max(1.5, aux.y * uScale / -mv.z); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `varying float vA;
+      void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float a = vA * (1.0 - smoothstep(0.25, 1.0, d)); if (a < 0.01) discard; gl_FragColor = vec4(0.95, 0.975, 1.0, a); }`,
+  });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 5;
+  let next = 0, acc = 0, alive = 0;
+  const rnd = Math.random;
+  // e: { x, z, fx, fz, sx, sz, vx, vz — лодка; wx, wz — ветер, м/с; heave, sf — плоскость воды под лодкой; speed — ход, м/с }
+  pts.userData.update = (dt, e, pxScale) => {
+    mat.uniforms.uScale.value = pxScale;
+    if (dt > 0 && e) {
+      const bowX = e.x + e.fx * 2.0, bowZ = e.z + e.fz * 2.0, bowY = e.heave + e.sf * 2.0;
+      const slam = Math.max(0, env.heightAt(bowX, bowZ) - bowY - 0.02);          // волна выше носа: удар
+      const rate = Math.max(0, e.speed - 2.3) * 55 + slam * e.speed * 1300;
+      acc = Math.min(70, acc + rate * dt);
+      const power = Math.min(1.6, 0.35 + e.speed * 0.14 + slam * 6);
+      while (acc >= 1) {
+        acc -= 1;
+        const k = next; next = (next + 1) % n;
+        const sd = rnd() < 0.5 ? -1 : 1, back = rnd() * 0.5, out = (0.5 + rnd() * 1.6) * power;
+        pos[k * 3] = bowX - e.fx * back + e.sx * sd * (0.05 + back * 0.3); pos[k * 3 + 1] = bowY + 0.05 + rnd() * 0.1; pos[k * 3 + 2] = bowZ - e.fz * back + e.sz * sd * (0.05 + back * 0.3);
+        vel[k * 3] = e.vx * 0.55 + e.sx * sd * out + e.fx * (rnd() - 0.3) * 0.8;
+        vel[k * 3 + 1] = (0.9 + rnd() * 2.3) * power;
+        vel[k * 3 + 2] = e.vz * 0.55 + e.sz * sd * out + e.fz * (rnd() - 0.3) * 0.8;
+        span[k] = life[k] = 0.5 + rnd() * 0.6; size[k] = 0.016 + rnd() * rnd() * 0.05;
+      }
+    }
+    alive = 0;
+    for (let k = 0; k < n; k++) {
+      if (life[k] <= 0) { aux[k * 2] = 0; continue; }
+      if (dt > 0) {
+        const o = k * 3, drag = Math.min(1, dt * 1.3);
+        vel[o] += ((e ? e.wx : 0) - vel[o]) * drag; vel[o + 2] += ((e ? e.wz : 0) - vel[o + 2]) * drag; vel[o + 1] -= 9.81 * dt;
+        pos[o] += vel[o] * dt; pos[o + 1] += vel[o + 1] * dt; pos[o + 2] += vel[o + 2] * dt;
+        life[k] -= dt;
+        if (vel[o + 1] < 0 && pos[o + 1] < env.heightAt(pos[o], pos[o + 2]) - 0.02) life[k] = 0;
+      }
+      const f = Math.max(0, life[k] / span[k]);
+      aux[k * 2] = Math.min(1, f * 2.2) * 0.6; aux[k * 2 + 1] = size[k] * (1.8 - 0.8 * f);
+      alive++;
+    }
+    pts.visible = alive > 0;
+    geo.attributes.position.needsUpdate = true; geo.attributes.aux.needsUpdate = true;
+  };
+  pts.userData.clear = () => { life.fill(0); acc = 0; };
+  return pts;
+}
+
+// ---------- отражение лодки в воде ----------
+// Зеркальная камера под водой рисует только лодку (слой 1) в небольшую текстуру; вода подмешивает её по Френелю.
+export function makeBoatReflection(size = 512) {
+  const target = new THREE.WebGLRenderTarget(size, size, { depthBuffer: true });
+  const cam = new THREE.PerspectiveCamera();
+  cam.layers.set(1);
+  const matrix = new THREE.Matrix4();
+  const N = new THREE.Vector3(0, 1, 0), P = new THREE.Vector3(), C = new THREE.Vector3(), V = new THREE.Vector3(), L = new THREE.Vector3(), T = new THREE.Vector3(), R = new THREE.Matrix4();
+  const plane = new THREE.Plane(), clip = new THREE.Vector4(), q = new THREE.Vector4(), clear = new THREE.Color();
+  // (px, h0, pz) — точка на поверхности воды у лодки. Возвращает false, если камера под водой.
+  function render(renderer, scene, camera, px, h0, pz) {
+    P.set(px, h0, pz); C.setFromMatrixPosition(camera.matrixWorld);
+    V.subVectors(P, C); if (V.dot(N) > 0) return false;
+    V.reflect(N).negate().add(P);
+    R.extractRotation(camera.matrixWorld);
+    L.set(0, 0, -1).applyMatrix4(R).add(C);
+    T.subVectors(P, L).reflect(N).negate().add(P);
+    cam.position.copy(V); cam.up.set(0, 1, 0).applyMatrix4(R).reflect(N); cam.lookAt(T);
+    cam.far = camera.far; cam.updateMatrixWorld(); cam.projectionMatrix.copy(camera.projectionMatrix);
+    matrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1).multiply(cam.projectionMatrix).multiply(cam.matrixWorldInverse);
+    // ближняя плоскость отсечения совмещается с водой: подводная часть лодки в отражение не попадает
+    plane.setFromNormalAndCoplanarPoint(N, P).applyMatrix4(cam.matrixWorldInverse);
+    clip.set(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant);
+    const pe = cam.projectionMatrix.elements;
+    q.x = (Math.sign(clip.x) + pe[8]) / pe[0]; q.y = (Math.sign(clip.y) + pe[9]) / pe[5]; q.z = -1; q.w = (1 + pe[10]) / pe[14];
+    clip.multiplyScalar(2 / clip.dot(q));
+    pe[2] = clip.x; pe[6] = clip.y; pe[10] = clip.z + 1 - 0.003; pe[14] = clip.w;
+    const rt = renderer.getRenderTarget(), auto = renderer.shadowMap.autoUpdate, alpha = renderer.getClearAlpha(), fog = scene.fog;
+    renderer.getClearColor(clear);
+    renderer.shadowMap.autoUpdate = false; scene.fog = null;
+    renderer.setRenderTarget(target); renderer.setClearColor(0x000000, 0); renderer.clear();
+    renderer.render(scene, cam);
+    renderer.setRenderTarget(rt); renderer.setClearColor(clear, alpha); renderer.shadowMap.autoUpdate = auto; scene.fog = fog;
+    return true;
+  }
+  return { target, matrix, render };
 }
 
 // ---------- текстовые спрайты ----------
