@@ -563,15 +563,20 @@ export function createBoat(env0 = null) {
   const trunkX = 0.45, trunkTop = deckAt(trunkX) + 0.06;
   const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.05, 0.075), matDark);
   trunk.position.set(trunkX, deckAt(trunkX) + 0.035, 0); heelG.add(trunk);
-  const board = foilMesh(foilShape(0.40, 0.26, 1.15, 0.03, 0.45), 0.022, matFoil);
-  board.position.set(trunkX + 0.2, trunkTop + 0.28, 0); board.userData.keep = true; heelG.add(board);
+  // Опущенный шверт сидит в колодце почти заподлицо: над палубой только упор и ручка, под днищем около 0,7 м.
+  // На попутных курсах его приподнимают, и тогда пластина встаёт над палубой.
+  const BOARD_DOWN = trunkTop + 0.02, BOARD_LIFT = 0.5, BOARD_AFT = trunkX - 0.2;   // BOARD_AFT — задняя кромка пластины
+  const board = foilMesh(foilShape(0.40, 0.26, 1.30, 0.03, 0.45), 0.022, matFoil);
+  board.position.set(trunkX + 0.2, BOARD_DOWN, 0); board.userData.keep = true; heelG.add(board);
   const boardTop = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.03), matFoil);
-  boardTop.position.set(trunkX, trunkTop + 0.29, 0); boardTop.userData.keep = true; heelG.add(boardTop);
+  boardTop.position.set(trunkX, BOARD_DOWN + 0.01, 0); boardTop.userData.keep = true; heelG.add(boardTop);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.011, 8, 18), matRubber);
-  handle.position.set(trunkX, trunkTop + 0.34, 0); handle.userData.keep = true; heelG.add(handle);
-  // амортизатор шверта (резинка к носу)
-  const bungee = rope(heelG, matDark, 0.005, 2, { keep: false });
-  bungee([new THREE.Vector3(trunkX, trunkTop + 0.3, 0), new THREE.Vector3(1.75, deckAt(1.75) + 0.04, 0)]);
+  handle.position.set(trunkX, BOARD_DOWN + 0.06, 0); handle.userData.keep = true; heelG.add(handle);
+  // амортизатор шверта (резинка к носу): тянется вслед за швертом
+  const bungee = rope(heelG, matDark, 0.005, 2);
+  const bungeePts = [new THREE.Vector3(trunkX, BOARD_DOWN + 0.02, 0), new THREE.Vector3(1.75, deckAt(1.75) + 0.04, 0)];
+  bungee(bungeePts);
+  let boardUp = 0;                                  // на сколько шверт сейчас поднят, м
 
   // ----- кокпит -----
   const strapMat = new THREE.MeshStandardMaterial({ color: '#2f3640', roughness: 0.95 });
@@ -880,7 +885,8 @@ export function createBoat(env0 = null) {
     const twa = out ? out.twaAbs : 90, spd = state.vf;
     const ay = Math.abs(state.crewY), hike = Math.min(1, Math.max(0, (ay - 0.45) / 0.6));
     const planing = Math.min(1, Math.max(0, (spd - 2.4) / 1.5));
-    const tx = twa < 95 ? -0.2 - 0.25 * hike : twa < 150 ? -0.4 - 0.4 * planing : -0.3 - 0.3 * planing;   // на попутных и в глиссировании — в корму
+    let tx = twa < 95 ? -0.2 - 0.25 * hike : twa < 150 ? -0.4 - 0.4 * planing : -0.3 - 0.3 * planing;   // на попутных и в глиссировании — в корму
+    if (boardUp > 0.06) tx = Math.min(tx, -0.62);     // шверт приподнят: матрос сидит дальше от него, чтобы было куда пригнуться
     // таз: до 0.45 м матрос сидит внутри лодки, дальше — на борту и вывешивается корпусом
     // Матрос всегда сидит на борту: в слабый ветер на внутренней кромке, ноги в кокпите, корпус наклонён внутрь;
     // чем свежее, тем дальше наружу. По центру он оказывается только на миг, когда переходит на другой борт.
@@ -927,6 +933,11 @@ export function createBoat(env0 = null) {
         const c = Math.max(0.25, 1 - SS.duck / (0.655 * Math.max(0.3, dir.y)));
         dir.x += Math.tan(Math.acos(c)) * dir.y; dir.normalize();
       }
+    }
+    // поднятый шверт стоит перед кокпитом: наклоняясь вперёд, матрос не достаёт до него головой
+    if (boardUp > 0.06) {
+      const maxX = (BOARD_AFT - 0.3 - P.hip.x) / 0.655;
+      if (dir.x > maxX) { dir.x = Math.max(0, maxX); dir.normalize(); }
     }
     const duckK = Math.min(1, SS.duck / 0.12);
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
@@ -1079,7 +1090,9 @@ export function createBoat(env0 = null) {
     sheetRope(sheetPts, sheetSags);
 
     rudderPivot.rotation.y = state.rudder * DEG;
-    board.position.y = trunkTop + 0.28 - 0.725 + 0.725 + (1 - state.board) * 0.6; boardTop.position.y = trunkTop + 0.29 + (1 - state.board) * 0.6; handle.position.y = trunkTop + 0.34 + (1 - state.board) * 0.6;
+    boardUp = (1 - state.board) * BOARD_LIFT;
+    board.position.y = BOARD_DOWN + boardUp; boardTop.position.y = BOARD_DOWN + 0.01 + boardUp; handle.position.y = BOARD_DOWN + 0.06 + boardUp;
+    bungeePts[0].y = BOARD_DOWN + 0.02 + boardUp; bungee(bungeePts);
     sheetState.ease += (out.sheet / 90 - sheetState.ease) * Math.min(1, dt * 3);
     sailor.visible = sailorEnabled && !out.capsized; handSheet.mesh.visible = sailor.visible;
     if (sailor.visible) updateSailor(state, api.holdPose ? 0 : dt, out);
