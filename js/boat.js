@@ -59,10 +59,14 @@ function buildHullGeometry() {
     const a = i * row + j, b = a + 1, c = a + row, d = c + 1;
     idx.push(a, c, b, b, c, d);
   }
+  // транец: отдельные вершины (плоская грань с чёткой кромкой), лицом в корму
   const st0 = stationAt(0);
+  const ring0 = pos.length / 3;
+  for (let j = 0; j <= NT; j++) { pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]); uv.push(0, j / NT); }
   const center = pos.length / 3;
   pos.push(st0.x, (st0.sheer + st0.keel) / 2, 0); uv.push(0, 0.5);
-  for (let j = 0; j < NT; j++) idx.push(center, j + 1, j);
+  for (let j = 0; j < NT; j++) idx.push(center, ring0 + j, ring0 + j + 1);
+  idx.push(center, ring0 + NT, ring0);         // верх транца под палубой
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
