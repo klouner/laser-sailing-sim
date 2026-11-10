@@ -828,7 +828,7 @@ export function createBoat(env0 = null) {
   //  • галфвинд/бакштаг — сидит на наветренном борту, при глиссировании смещается в корму
   //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
   //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
-  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0 };
+  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0, sgn: 0, flip: 0 };
   // временные векторы кадра: берутся из пула, память в кадре не выделяется
   const pool = []; let poolI = 0;
   const tv = () => pool[poolI++] || (pool[poolI - 1] = new THREE.Vector3());
@@ -842,10 +842,18 @@ export function createBoat(env0 = null) {
     const planing = Math.min(1, Math.max(0, (spd - 2.4) / 1.5));
     const tx = twa < 95 ? -0.2 - 0.25 * hike : twa < 150 ? -0.4 - 0.4 * planing : -0.3 - 0.3 * planing;   // на попутных и в глиссировании — в корму
     // таз: до 0.45 м матрос сидит внутри лодки, дальше — на борту и вывешивается корпусом
-    const seat = ay <= 0.45 ? ay : 0.46 + 0.22 * hike;
-    const ttheta = ay <= 0.45 ? 0.08 + 0.3 * (ay / 0.45) : 0.38 + 1.07 * hike;
+    // Матрос всегда сидит на борту: в слабый ветер на внутренней кромке, ноги в кокпите, корпус наклонён внутрь;
+    // чем свежее, тем дальше наружу. По центру он оказывается только на миг, когда переходит на другой борт.
+    const edge = cockpitHalfWidth(SS.x) + 0.03;
+    const seat = Math.max(edge, 0.46 + 0.22 * hike);
+    const ttheta = ay <= 0.45 ? -0.30 + 0.68 * (ay / 0.45) : 0.38 + 1.07 * hike;
+    // борт: наветренный, пока физика не посадила матроса явно на другой; смена борта с короткой задержкой, без дёрганья
+    const wantSide = ay > 0.1 ? Math.sign(state.crewY) : (state.side || 1);
+    if (!SS.sgn) SS.sgn = wantSide;
+    if (wantSide !== SS.sgn) { SS.flip += dt; if (SS.flip > 0.3) { SS.sgn = wantSide; SS.flip = 0; } } else SS.flip = 0;
     SS.x += (tx - SS.x) * k; SS.theta += (ttheta - SS.theta) * Math.min(1, dt * 8);
-    SS.y += (Math.sign(state.crewY) * seat - SS.y) * Math.min(1, dt * 14);
+    const dyS = (SS.sgn * seat - SS.y) * Math.min(1, dt * 14), maxS = 2.4 * dt;
+    SS.y += Math.max(-maxS, Math.min(maxS, dyS));
     const sv = THREE.MathUtils.clamp(SS.y / 0.3, -1, 1);          // куда наклонён корпус; у диаметральной плоскости — прямо
     SS.crouch += ((1 - Math.abs(sv)) - SS.crouch) * Math.min(1, dt * 8);
     const h = Math.min(1, Math.max(0, (SS.theta - 0.38) / 1.07)); // степень откренивания 0..1
