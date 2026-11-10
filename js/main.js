@@ -106,10 +106,10 @@ const arrows = {
   vel: new VectorArrow(scene, 'rgb(255,255,255)', 'Скорость лодки'),
   force: new VectorArrow(scene, 'rgb(255,87,0)', 'Сила на парусе'),
 };
-arrows.trueWind.labelAt = 0.0; arrows.trueWind.labelLift = 0.45;
-arrows.appWind.labelAt = 0.4; arrows.appWind.labelLift = 0.5;
-arrows.vel.labelAt = 1.0; arrows.vel.labelLift = 0.45;
-arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.45;
+arrows.trueWind.labelAt = 0.0; arrows.trueWind.labelLift = 0.3;
+arrows.appWind.labelAt = 0.4; arrows.appWind.labelLift = 0.3;
+arrows.vel.labelAt = 1.0; arrows.vel.labelLift = 0.3;
+arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.3;
 
 const course = createCourse(scene, env);
 const lessons = createLessonRunner();
@@ -286,7 +286,6 @@ function togglePause() {
   ctl.paused = !ctl.paused;
   $('btn-pause').textContent = ctl.paused ? 'Продолжить' : 'Пауза';
   $('btn-pause').classList.toggle('active', ctl.paused);
-  $('t-pause').textContent = ctl.paused ? '▶' : '⏸';
   $('t-pause').classList.toggle('active', ctl.paused);
 }
 function reset() {
@@ -447,7 +446,7 @@ function updateTraining(out, dt, t) {
       if (n !== updateTraining.lastN) { updateTraining.lastN = n; if (n > 0) toast(String(n), true, 900); }
     }
     const ev = course.update(state, ctl, dt, t);
-    if (ev === 'go') { ctl.paused = false; toast('СТАРТ!', true, 1200); $('btn-pause').textContent = 'Пауза'; $('t-pause').textContent = '⏸'; }
+    if (ev === 'go') { ctl.paused = false; toast('СТАРТ!', true, 1200); $('btn-pause').textContent = 'Пауза'; $('t-pause').classList.remove('active'); }
     if (ev === 'rounded') toast('Буй обогнут! Теперь по ветру, финиш между синими буями', false, 2800);
     if (ev === 'notRounded') toast('Буй не обогнут: пройдите выше него и вернитесь с другой стороны', false, 3200);
     if (ev === 'missedGate') toast('Мимо ворот: финиш между синими буями', false, 2800);
@@ -495,7 +494,7 @@ function setCamera(mode) {
   camMode = mode;
   const cockpit = mode === 'cockpit';
   controls.enabled = !cockpit; boat.setHead(!cockpit); compass.userData.setNearLabels(!cockpit); eyeInit = false;
-  camera.near = cockpit ? 0.04 : 0.1; camera.fov = baseFov(); camera.updateProjectionMatrix();
+  camera.near = cockpit ? 0.04 : 0.1; camera.fov = baseFov(); camera.updateProjectionMatrix(); layoutDirty = true;
   if (cockpit) { look.yaw = 0; look.pitch = -0.1; document.querySelectorAll('#cam-seg button').forEach(b => b.classList.toggle('active', b.dataset.cam === mode)); return; }
   if (was === 'cockpit' && mode === 'free') mode = 'chase', camMode = 'free';
   document.querySelectorAll('#cam-seg button').forEach(b => b.classList.toggle('active', b.dataset.cam === camMode));
@@ -591,7 +590,7 @@ let labelK = 1;
 let lastOffsetY = null;
 let hudVisible = true;
 // Раскладка пересчитывается только когда что-то изменило размер (окно, шапка, пульт), а не каждый кадр
-let layoutDirty = true;
+var layoutDirty = true;      // var: флаг выставляется и из функций, объявленных выше по файлу
 const markLayout = () => { layoutDirty = true; };
 window.addEventListener('resize', markLayout); window.addEventListener('orientationchange', markLayout);
 if ('ResizeObserver' in window) { const ro = new ResizeObserver(markLayout); ro.observe($('topbar')); ro.observe($('touch')); ro.observe(canvas); ro.observe($('hud')); }
@@ -612,8 +611,9 @@ function layoutOverlays(w, h) {
     if (offY) camera.setViewOffset(w, h, 0, offY, w, h); else camera.clearViewOffset();
     camera.updateProjectionMatrix();
   }
-  const k = THREE.MathUtils.clamp(w / 1100, 0.5, 1);
-  if (Math.abs(k - labelK) > 0.01) {
+  // подписи в сцене держат размер в пикселях; на узком экране они чуть мельче
+  const k = 2 * Math.tan(camera.fov * DEG / 2) / h * (w < 600 ? 0.82 : 1);
+  if (Math.abs(k - labelK) > labelK * 0.01) {
     labelK = k; setLabelScale(compass, k);
     for (const a of Object.values(arrows)) a.setLabelScale(k);
   }

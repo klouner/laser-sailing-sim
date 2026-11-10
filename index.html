@@ -10,7 +10,7 @@
 <meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=51">
+<link rel="stylesheet" href="style.css?v=52">
 <script type="importmap">
 {
   "imports": {
@@ -75,7 +75,7 @@
       </label>
       <div class="checks">
         <label><input type="checkbox" id="gusts" checked> Порывы и заходы ветра <small>(±20%, ±9°)</small></label>
-        <label><input type="checkbox" id="compassWind"> 📱 Ветер по компасу телефона <small id="compassState"></small></label>
+        <label><input type="checkbox" id="compassWind"> Ветер по компасу телефона <small id="compassState"></small></label>
       </div>
     </section>
 
@@ -126,7 +126,7 @@
       <h2>Тренировка</h2>
       <div class="lesson-list" id="lesson-list"></div>
       <div class="btns">
-        <button id="btn-race" class="btn">🏁 Гонка на время</button>
+        <button id="btn-race" class="btn accent">Гонка на время</button>
         <button id="btn-course" class="btn secondary" title="Трасса без таймера">Буи без таймера</button>
       </div>
       <div class="race-help">Трасса: от ворот к оранжевому бую (110 м против ветра), обогнуть его с любой стороны и финишировать между синими буями. Ветер ровный, 10 уз с севера; автошкот и автоповорот выключены.</div>
@@ -203,13 +203,13 @@
 
   <div id="touch">
     <div class="t-actions">
-      <button id="t-pause" class="t-btn" title="Пауза">⏸</button>
-      <button id="t-cam" class="t-btn" title="Камера">📷</button>
-      <button id="t-tack" class="t-btn"><span class="ic">⟲</span> <span class="tx">Оверштаг</span></button>
-      <button id="t-compass" class="t-btn" title="Ветер по компасу телефона">🧭</button>
+      <button id="t-pause" class="t-btn" title="Пауза"><svg class="ico pause" viewBox="0 0 20 20"><path d="M7 4v12M13 4v12"/></svg><svg class="ico play" viewBox="0 0 20 20"><path d="M6 4l10 6-10 6z"/></svg></button>
+      <button id="t-cam" class="t-btn" title="Камера"><svg class="ico" viewBox="0 0 20 20"><path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="2.8"/></svg></button>
+      <button id="t-tack" class="t-btn"><svg class="ico" viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 0 2-4.5"/><path d="M4 3v3.5h3.5"/></svg><span class="tx">Оверштаг</span></button>
+      <button id="t-compass" class="t-btn" title="Ветер по компасу телефона"><svg class="ico" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M12.6 7.4l-1.5 3.7-3.7 1.5 1.5-3.7z"/></svg></button>
       <button id="t-auto" class="t-btn">Авто</button>
-      <button id="t-train" class="t-btn" title="Уроки и гонка">🎓</button>
-      <button id="t-panel" class="t-btn" title="Настройки">☰</button>
+      <button id="t-train" class="t-btn" title="Уроки и гонка"><svg class="ico" viewBox="0 0 20 20"><path d="M5 17V3"/><path d="M5 4h10l-2.5 3.5L15 11H5"/></svg></button>
+      <button id="t-panel" class="t-btn" title="Настройки"><svg class="ico" viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/></svg></button>
     </div>
     <div class="t-wind">
       <button id="t-windL" class="t-btn">↺ −10°</button>
@@ -231,7 +231,7 @@
   </div>
 
   <div id="lb" class="lb">
-    <button id="lb-chip" class="lb-chip">🏆 <span id="lb-best">Рекордов пока нет</span></button>
+    <button id="lb-chip" class="lb-chip"><svg class="ico" viewBox="0 0 20 20"><path d="M6 3h8v5a4 4 0 0 1-8 0z"/><path d="M6 5H3.5a2.5 2.5 0 0 0 2.7 3M14 5h2.5a2.5 2.5 0 0 1-2.7 3M10 12v3M7 17h6"/></svg><span id="lb-best">Рекордов пока нет</span></button>
     <div id="lb-list" class="lb-list" hidden>
       <div class="lb-title">Топ-10 гонки <small id="lb-scope"></small></div>
       <ol id="lb-ol"></ol>
@@ -250,6 +250,6 @@
 
   <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
 </div>
-<script type="module" src="js/main.js?v=51"></script>
+<script type="module" src="js/main.js?v=52"></script>
 </body>
 </html>

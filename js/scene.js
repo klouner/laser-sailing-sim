@@ -358,26 +358,26 @@ export function makeBoatReflection(size = 512) {
 }
 
 // ---------- текстовые спрайты ----------
-export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(12,12,12,0.85)', size = 44, scale = 1 } = {}) {
+// px — высота подписи на экране в пикселях: подписи не растут при приближении камеры и не закрывают сцену
+export function makeTextSprite(text, { color = '#ffffff', bg = 'rgba(0,0,0,0.78)', size = 44, px = 20 } = {}) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
-  g.font = `600 ${size}px Inter, Arial, sans-serif`;
-  const w = Math.ceil(g.measureText(text).width) + 36;
+  g.font = `500 ${size}px Inter, Arial, sans-serif`;
+  const w = Math.ceil(g.measureText(text).width) + 40;
   c.width = w; c.height = size + 28;
-  g.font = `600 ${size}px Inter, Arial, sans-serif`;
+  g.font = `500 ${size}px Inter, Arial, sans-serif`;
   g.fillStyle = bg;
-  const r = 16; g.beginPath(); g.roundRect(0, 0, c.width, c.height, r); g.fill();
+  const r = 8; g.beginPath(); g.roundRect(0, 0, c.width, c.height, r); g.fill();
   g.fillStyle = color; g.textBaseline = 'middle'; g.textAlign = 'center';
   g.fillText(text, c.width / 2, c.height / 2 + 2);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
-  const k = 0.012 * scale;
-  sp.scale.set(c.width * k, c.height * k, 1);
-  sp.userData.baseScale = sp.scale.clone();
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false }));
+  sp.userData.baseScale = new THREE.Vector3(px * c.width / c.height, px, 1);      // размер в пикселях экрана
+  sp.scale.copy(sp.userData.baseScale).multiplyScalar(0.002);
   sp.renderOrder = 10;
   return sp;
 }
-// масштаб всех текстовых спрайтов внутри объекта (для узких экранов)
+// k — сколько единиц масштаба спрайта приходится на пиксель экрана: 2·tg(угол обзора / 2) / высота окна
 export function setLabelScale(obj, k) {
   obj.traverse((o) => { if (o.isSprite && o.userData.baseScale) o.scale.copy(o.userData.baseScale).multiplyScalar(k); });
 }
@@ -401,25 +401,26 @@ export function makeCompassRing(env) {
   const names = [['С', 0], ['В', 90], ['Ю', 180], ['З', 270]];
   const labels = [];
   for (const [n, b] of names) {
-    const sp = makeTextSprite(n, { size: 56, bg: 'rgba(12,12,12,0.7)', scale: 0.45 });
+    const sp = makeTextSprite(n, { size: 56, bg: 'rgba(0,0,0,0.6)', px: 22 });
     const a = (90 - b) * DEG;
-    sp.position.set(Math.cos(a) * (R + 0.45), 0.3, -Math.sin(a) * (R + 0.45));
+    sp.position.set(Math.cos(a) * (R + 0.4), 0.15, -Math.sin(a) * (R + 0.4));
     g.add(sp); labels.push(sp);
   }
   // мёртвая зона — сектор ±42°
   const wedgeGeo = new THREE.RingGeometry(0.15, R - 0.15, 40, 10, -42 * DEG, 84 * DEG); wedgeGeo.rotateX(-Math.PI / 2);
   const wedge = new THREE.Mesh(wedgeGeo, flatMat('#ff3b30', 0.22, env, LIFT - 0.01));
   const wedgeG = new THREE.Group(); wedgeG.add(wedge);
-  const wedgeLabel = makeTextSprite('МЁРТВАЯ ЗОНА', { color: '#ffffff', size: 36, scale: 0.45 });
-  wedgeLabel.position.set(R * 0.7, 0.25, 0); wedgeG.add(wedgeLabel);
+  // подпись стоит у края сектора за кольцом: не закрывает лодку и не спорит с подписью ветра
+  const wedgeLabel = makeTextSprite('МЁРТВАЯ ЗОНА', { color: '#ffffff', bg: 'rgba(255,59,48,0.82)', size: 40, px: 17 });
+  wedgeLabel.position.set(Math.cos(27 * DEG) * R * 0.74, 0.1, -Math.sin(27 * DEG) * R * 0.74); wedgeG.add(wedgeLabel);
   g.add(wedgeG);
   // стрелка ветра на кольце (остриём к центру)
   const shape = new THREE.Shape();
   shape.moveTo(0, 0); shape.lineTo(-0.9, 0.5); shape.lineTo(-0.9, 0.18); shape.lineTo(-2.4, 0.18); shape.lineTo(-2.4, -0.18); shape.lineTo(-0.9, -0.18); shape.lineTo(-0.9, -0.5); shape.closePath();
   const arrowGeo = new THREE.ShapeGeometry(shape); arrowGeo.rotateZ(Math.PI); arrowGeo.rotateX(-Math.PI / 2); arrowGeo.translate(R + 0.25, 0, 0);
   const arrowG = new THREE.Group(); arrowG.add(new THREE.Mesh(arrowGeo, flatMat('#0047ff', 0.9, env, LIFT + 0.08)));
-  const windLabel = makeTextSprite('ВЕТЕР', { color: '#ffffff', bg: 'rgba(0,71,255,0.9)', size: 44, scale: 0.4 });
-  windLabel.position.set(R + 3.1, 0.35, 0); arrowG.add(windLabel);
+  const windLabel = makeTextSprite('ВЕТЕР', { color: '#ffffff', bg: 'rgba(0,71,255,0.9)', size: 44, px: 18 });
+  windLabel.position.set(R + 2.75, 0.3, 0); arrowG.add(windLabel);
   g.add(arrowG);
 
   g.userData.update = (bx, bz, windFromDeg) => {
@@ -450,8 +451,8 @@ export class VectorArrow {
     this.canvas = document.createElement("canvas"); this.canvas.width = 420; this.canvas.height = 72;
     this.ctx = this.canvas.getContext("2d");
     this.tex = new THREE.CanvasTexture(this.canvas); this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false }));
-    this.label.scale.set(420 * 0.0062, 72 * 0.0062, 1); this.label.userData.baseScale = this.label.scale.clone(); this.label.renderOrder = 10;
+    this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false }));
+    this.label.userData.baseScale = new THREE.Vector3(26 * 420 / 72, 26, 1); this.label.scale.copy(this.label.userData.baseScale).multiplyScalar(0.002); this.label.renderOrder = 10;
     this.labelAt = 0.5; this.labelLift = 0.35; this.labelScale = 1;
     this._text = null; this._since = 1;
     scene.add(this.label);
@@ -461,10 +462,10 @@ export class VectorArrow {
   draw(text) {
     const g = this.ctx, c = this.canvas;
     g.clearRect(0, 0, c.width, c.height);
-    g.font = "600 38px Inter, Arial, sans-serif";
+    g.font = "500 38px Inter, Arial, sans-serif";
     const w = Math.min(c.width, Math.ceil(g.measureText(text).width) + 34);
     g.fillStyle = this.color; g.globalAlpha = 0.9;
-    g.beginPath(); g.roundRect((c.width - w) / 2, 4, w, 64, 14); g.fill();
+    g.beginPath(); g.roundRect((c.width - w) / 2, 4, w, 64, 8); g.fill();
     const rgb = this.color.match(/\d+/g).map(Number); const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
     g.globalAlpha = 1; g.fillStyle = lum > 0.6 ? "#111111" : "#ffffff"; g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(text, c.width / 2, 38);
@@ -482,7 +483,7 @@ export class VectorArrow {
     const shaftLen = len - headLen;
     this.shaft.scale.set(r, shaftLen, r); this.shaft.position.y = shaftLen / 2;
     this.head.scale.set(headR, headLen, headR); this.head.position.y = shaftLen + headLen / 2;
-    this.label.position.copy(from).lerp(to, this.labelAt); this.label.position.y += this.labelLift * this.labelScale;
+    this.label.position.copy(from).lerp(to, this.labelAt); this.label.position.y += this.labelLift;
     this._since += dt;
     if (text && text !== this._text && this._since > 0.25) { this._since = 0; this.draw(text); }
   }
