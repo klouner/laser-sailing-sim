@@ -163,9 +163,10 @@ $('btn-tack').addEventListener('click', () => {
   if (raceLocked() || lessons.run.status === 'running') { toast('В уроках и гонке поворот делаем рулём вручную'); return; }
   const twa = norm180(ctl.windFrom - state.heading);
   if (Math.abs(twa) > 95) { // на попутных курсах — поворот фордевинд
-    autopilot = { target: ctl.windFrom + 180 + (twa > 0 ? 40 : -40) };
+    autopilot = { target: ctl.windFrom + 180 + (twa > 0 ? -40 : 40) };
   } else {
-    autopilot = { target: ctl.windFrom - Math.sign(twa || 1) * Math.max(45, Math.abs(twa)) };
+    // новый курс зеркален старому относительно ветра: тот же угол к ветру, но другим бортом
+    autopilot = { target: ctl.windFrom + Math.sign(twa || 1) * Math.max(45, Math.abs(twa)) };
   }
   ui.lockHeading.checked = false; ctl.lockHeading = false;
 });
