@@ -257,3 +257,5 @@ details[open] summary::before{transform:rotate(90deg)}
 .fps{position:absolute;left:16px;top:88px;z-index:5;background:rgba(18,18,18,.72);border:1px solid var(--border);border-radius:999px;padding:4px 10px;font:500 11px Inter,sans-serif;color:#cfcfcf;font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
 .fps[hidden]{display:none}
 @media (max-width:899px){.fps{left:auto;right:8px;top:calc(8px + env(safe-area-inset-top,0px));padding:3px 8px;font-size:10px}}
+#cam-seg{flex-wrap:wrap}
+#cam-seg button{flex:1 1 30%}

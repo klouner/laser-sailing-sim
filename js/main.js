@@ -9,6 +9,7 @@ import { createEnvironment } from './env.js';
 import { LESSONS, createLessonRunner } from './lessons.js';
 import { loadTop, isRecord, submit, rememberName, savedName, isShared } from './leaderboard.js';
 import { initAnalytics } from './analytics.js';
+import { createAudio } from './audio.js';
 
 const DEG = Math.PI / 180;
 const $ = (id) => document.getElementById(id);
@@ -25,10 +26,15 @@ const LEVELS = {
   high: { maxDpr: Math.min(DEVICE_DPR, 2), minDpr: 1, shadow: 2048, fx: 2 },
 };
 const LEVEL_NAME = { low: 'низкое', med: 'среднее', high: 'высокое' };
-const prefs = { quality: 'auto', fps: false };
+const prefs = { quality: 'auto', fps: false, sound: true };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('laser3d.view') || '{}')); } catch (e) {}
 if (!LEVELS[prefs.quality]) prefs.quality = 'auto';
 const savePrefs = () => { try { localStorage.setItem('laser3d.view', JSON.stringify(prefs)); } catch (e) {} };
+const audio = createAudio(), sound = { aws: 0, speed: 0, luff: 0, sheet: 45, slam: 0, paused: false };
+audio.setEnabled(false);
+// звук можно включить только из обработчика действия пользователя: первое касание или клавиша
+const unlockAudio = () => { if (prefs.sound) audio.setEnabled(true); };
+window.addEventListener('pointerdown', unlockAudio, { passive: true }); window.addEventListener('keydown', unlockAudio);
 const autoLevel = isTouch ? 'med' : 'high';
 let level = prefs.quality === 'auto' ? autoLevel : prefs.quality;
 let QUALITY = LEVELS[level];
@@ -235,7 +241,16 @@ function bindPad(el, thumb, horizontal, onValue, onRelease, holds = false) {
 bindPad($('t-rudder'), $('t-rudder-thumb'), true, (k) => setRudder(k * 35), null, true);
 bindPad($('t-sheet'), $('t-sheet-thumb'), false, (k) => setSheet(BOAT.boomMin + k * (90 - BOAT.boomMin)));
 $('t-pause').addEventListener('click', togglePause);
-$('t-cam').addEventListener('click', () => { const order = ['chase', 'top', 'side', 'free']; setCamera(order[(order.indexOf(camMode) + 1) % 4]); });
+$('t-cam').addEventListener('click', () => { setCamera(CAM_ORDER[(CAM_ORDER.indexOf(camMode) + 1) % CAM_ORDER.length]); });
+// из кокпита взгляд поворачивается перетаскиванием
+canvas.addEventListener('pointerdown', (e) => { if (camMode === 'cockpit') { look.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); } });
+canvas.addEventListener('pointermove', (e) => {
+  if (camMode !== 'cockpit' || !look.drag || look.drag.id !== e.pointerId) return;
+  look.yaw = THREE.MathUtils.clamp(look.yaw + (e.clientX - look.drag.x) * 0.006, -2.7, 2.7);
+  look.pitch = THREE.MathUtils.clamp(look.pitch + (e.clientY - look.drag.y) * 0.005, -1.0, 1.0);
+  look.drag.x = e.clientX; look.drag.y = e.clientY;
+});
+for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { look.drag = null; });
 $('t-tack').addEventListener('click', () => $('btn-tack').click());
 $('t-auto').addEventListener('click', () => setAutoSheet(!ctl.autoSheet));
 $('t-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
@@ -278,7 +293,7 @@ window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'Space') { e.preventDefault(); togglePause(); }
   if (e.code === 'KeyR') reset();
-  if (e.code === 'KeyC') { const order = ['chase', 'top', 'side', 'free']; setCamera(order[(order.indexOf(camMode) + 1) % 4]); }
+  if (e.code === 'KeyC') setCamera(CAM_ORDER[(CAM_ORDER.indexOf(camMode) + 1) % CAM_ORDER.length]);
   if (e.code === 'KeyV') { const v = !show.trueWind; for (const k of ['trueWind', 'appWind', 'vel', 'force']) show[k] = v; ['showTrue', 'showApp', 'showVel', 'showForce'].forEach(id => $(id).checked = v); }
   if (e.code === 'KeyT') $('btn-tack').click();
 });
@@ -413,7 +428,7 @@ function askName(time) {
 }
 let wasCapsized = false;
 function updateTraining(out, dt, t) {
-  if (out.capsized && !wasCapsized) { toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
+  if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
   wasCapsized = !!out.capsized;
   if (mode === 'race') {
     const r = course.race;
@@ -454,7 +469,7 @@ function updateTraining(out, dt, t) {
   }
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, boat, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { get level() { return level; }, prefs, camera, controls, setCamera, boat, audio, get look() { return look; }, state, ctl, course, lessons, startRace, startLesson, renderer, scene, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -462,9 +477,19 @@ const camTargetOffset = new THREE.Vector3(0, 0.9, 0);
 let lastHeading = state.heading;
 function boatForward() { const p = state.heading * DEG; return new THREE.Vector3(Math.sin(p), 0, -Math.cos(p)); }
 function boatStarboard() { const p = state.heading * DEG; return new THREE.Vector3(Math.cos(p), 0, Math.sin(p)); }
+const look = { yaw: 0, pitch: -0.1, drag: null };       // взгляд из кокпита относительно носа лодки
+const baseFov = () => { const a = canvas.clientWidth / Math.max(1, canvas.clientHeight); return camMode === 'cockpit' ? (a < 0.9 ? 92 : 74) : (a < 0.9 ? 68 : 50); };
+const CAM_ORDER = ['chase', 'top', 'side', 'cockpit', 'free'];
+const eye = new THREE.Vector3(), eyeTo = new THREE.Vector3(); let eyeInit = false;
 function setCamera(mode) {
+  const was = camMode;
   camMode = mode;
-  document.querySelectorAll('#cam-seg button').forEach(b => b.classList.toggle('active', b.dataset.cam === mode));
+  const cockpit = mode === 'cockpit';
+  controls.enabled = !cockpit; boat.setHead(!cockpit); compass.userData.setNearLabels(!cockpit); eyeInit = false;
+  camera.near = cockpit ? 0.04 : 0.1; camera.fov = baseFov(); camera.updateProjectionMatrix();
+  if (cockpit) { look.yaw = 0; look.pitch = -0.1; document.querySelectorAll('#cam-seg button').forEach(b => b.classList.toggle('active', b.dataset.cam === mode)); return; }
+  if (was === 'cockpit' && mode === 'free') mode = 'chase', camMode = 'free';
+  document.querySelectorAll('#cam-seg button').forEach(b => b.classList.toggle('active', b.dataset.cam === camMode));
   const f = boatForward(), s = boatStarboard();
   const off = new THREE.Vector3();
   if (mode === 'chase') off.copy(f).multiplyScalar(-9.5).addScaledVector(s, -3.5 * state.side).setY(4.2);
@@ -479,6 +504,16 @@ function setCamera(mode) {
 }
 const camT = new THREE.Vector3(), camO = new THREE.Vector3(), camUp = new THREE.Vector3(0, 1, 0);
 function updateCamera(dt) {
+  if (camMode === 'cockpit') {
+    // глаза матроса: положение головы сглаживается, горизонт остаётся ровным, а лодка кренится вокруг
+    boat.headWorld(eyeTo); eyeTo.y += 0.05;
+    if (!eyeInit) { eye.copy(eyeTo); eyeInit = true; } else eye.lerp(eyeTo, Math.min(1, dt * 10));
+    const a = (90 - state.heading) * DEG + look.yaw, cp = Math.cos(look.pitch);
+    camera.position.copy(eye);
+    camT.set(eye.x + Math.cos(a) * cp, eye.y + Math.sin(look.pitch), eye.z - Math.sin(a) * cp);
+    camera.up.set(0, 1, 0); camera.lookAt(camT);
+    return;
+  }
   const target = camT.copy(boat.root.position).add(camTargetOffset);
   const off = camO.copy(camera.position).sub(controls.target);
   if (camMode === 'chase' || camMode === 'side') {
@@ -579,7 +614,7 @@ function resize() {
   if (!w || !h) return;
   if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
     renderer.setPixelRatio(dpr); renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.fov = w / h < 0.9 ? 68 : 50;
+    camera.aspect = w / h; camera.fov = baseFov();
     lastOffsetY = null;            // смещение кадра зависит от размера — пересчитать
     camera.updateProjectionMatrix();
   }
@@ -625,6 +660,8 @@ $('q-seg').addEventListener('click', (e) => {
   const q = e.target.dataset && e.target.dataset.q; if (!q) return;
   prefs.quality = q; savePrefs(); setLevel(q === 'auto' ? autoLevel : q);
 });
+$('soundOn').checked = prefs.sound;
+$('soundOn').addEventListener('change', (e) => { prefs.sound = e.target.checked; savePrefs(); audio.setEnabled(prefs.sound); });
 $('showFps').checked = prefs.fps;
 $('showFps').addEventListener('change', (e) => { prefs.fps = e.target.checked; savePrefs(); showFps(); });
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
@@ -652,6 +689,7 @@ function simulate(dt) {
   if (!out || out.AWS === undefined) out = step(state, ctl, 0, env);
   if (state.lastGybe.time !== lastGybeSeen) {
     lastGybeSeen = state.lastGybe.time;
+    if (state.lastGybe.kick > 0.8) audio.thud(state.lastGybe.kick);
     if (state.lastGybe.kick > 1.6) toast(state.lastGybe.kick > 2.8 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
   }
   updateTraining(out, dt, t);
@@ -688,20 +726,24 @@ function frame() {
   const center = tmpC.copy(boat.root.position); center.y = 0.95 + boat.heelG.position.y;
   const WS = 0.5; // м на 1 м/с ветра
   const endAt = (v, vx, vz, R) => { const L = Math.hypot(vx, vz) || 1; return v.set(center.x - vx / L * R, center.y, center.z - vz / L * R); };
-  arrows.trueWind.setVisible(show.trueWind, show.labels);
+  const vec = camMode !== 'cockpit';
+  arrows.trueWind.setVisible(show.trueWind && vec, show.labels);
   arrows.trueWind.set(tmpB.set(center.x - out.Wx * WS, center.y, center.z - out.Wz * WS), endAt(tmpA, out.Wx, out.Wz, 1.0), `Ветер ${fmt(out.windKn, 0)} уз`, dt);
-  arrows.appWind.setVisible(show.appWind, show.labels);
+  arrows.appWind.setVisible(show.appWind && vec, show.labels);
   const appY = center.y + 1.45;
   const appFrom = tmpB.set(center.x - out.Ax * WS, appY, center.z - out.Az * WS);
   const appTo = endAt(tmpA, out.Ax, out.Az, 0.6); appTo.y = appY;
   arrows.appWind.set(appFrom, appTo, `Вымпельный ${fmt(out.AWS / KN, 0)} уз`, dt);
-  arrows.vel.setVisible(show.vel, show.labels);
+  arrows.vel.setVisible(show.vel && vec, show.labels);
   arrows.vel.set(center, tmpA.set(center.x + out.Vx * 1.3, center.y, center.z + out.Vz * 1.3), `${fmt(out.speedKn)} уз`, dt);
-  arrows.force.setVisible(show.force, show.labels);
+  arrows.force.setVisible(show.force && vec, show.labels);
   const fs = 0.012;
   const fOrigin = tmpB.set(center.x + out.fx * 0.3, center.y + 0.75, center.z + out.fz * 0.3);
   arrows.force.set(fOrigin, tmpA.set(fOrigin.x + out.forceWorldX * fs, fOrigin.y, fOrigin.z + out.forceWorldZ * fs), `${Math.round(out.Fmag)} Н`, dt);
 
+  sound.aws = out.AWS; sound.speed = out.capsized ? 0 : state.vf; sound.luff = out.luffing && !out.capsized ? 1 : 0; sound.sheet = state.sheetNow; sound.paused = ctl.paused;
+  sound.slam = Math.max(0, env.heightAt(state.x + out.fx * 2, state.z + out.fz * 2) - boat.sea.heave - boat.sea.sf * 2 - 0.02);
+  audio.update(dt, sound);
   ctl.sheetShown = out.sheet;
   updateTouch();
   updateCamera(dt);

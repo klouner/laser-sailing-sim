@@ -429,6 +429,8 @@ export function makeCompassRing(env) {
     g.position.y = env.ampTotal * 0.5;      // подписи приподнимаются вместе с волнением
   };
   g.userData.setNoGo = (v) => { wedgeG.visible = v; };
+  // вблизи (вид из кокпита) подписи на воде закрывают обзор
+  g.userData.setNearLabels = (v) => { wedgeLabel.visible = v; windLabel.visible = v; };
   return g;
 }
 

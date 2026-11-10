@@ -873,5 +873,9 @@ export function createBoat(env0 = null) {
   }
 
   let sailorEnabled = true;
-  return { root, heelG, rig, sea, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
+  const headWorld = (v) => headG.getWorldPosition(v);
+  // вид из глаз: голова и корпус матроса скрыты, руки и ноги остаются в кадре
+  const fpHide = [headG, neck, pelvis, torso, vestM, vestBand, shoulderL, shoulderR, upArmA, upArmB];
+  const setHead = (v) => { for (const m of fpHide) (m.mesh || m).visible = v; };
+  return { root, heelG, rig, sea, headWorld, setHead, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
 }
