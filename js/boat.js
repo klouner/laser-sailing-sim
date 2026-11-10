@@ -285,15 +285,112 @@ function makeHullDecal(side, tex) {
 
 // ---------- вспомогательные ----------
 // Сегмент конечности от сустава a к суставу b: радиус r0 у начала, r1 у конца
-const _limbD = new THREE.Vector3();
-function limb(mat, r0, r1 = r0 * 0.8) {
-  const g = new THREE.Group();
-  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, 1, 14), mat); cyl.position.y = 0.5; cyl.castShadow = true;
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(r0, 12, 10), mat);
-  g.add(cyl); g.add(cap);
-  g.userData.set = (a, b) => { const d = _limbD.copy(b).sub(a); const L = d.length() || 1e-4; g.position.copy(a); g.quaternion.setFromUnitVectors(Y, d.divideScalar(L)); cyl.scale.y = L; cyl.position.y = L / 2; };
-  return g;
+// ---------- тело матроса: одна оболочка ----------
+// Торс, руки и ноги — одна сетка с цветом в вершинах. Каждый кадр кольца оболочки переставляются по суставам,
+// которые даёт кинематика: в локтях и коленях получается плавный сгиб без шаров-шарниров. Число вершин постоянно.
+const BODY_SIDES = 12;
+// торс: [расстояние вдоль корпуса от таза, полуширина по линии плеч, полутолщина, цвет]
+const TORSO_RINGS = [
+  [-0.125, 0.002, 0.002, 'pants'], [-0.10, 0.115, 0.095, 'pants'], [-0.04, 0.182, 0.150, 'pants'], [0.02, 0.182, 0.150, 'pants'], [0.058, 0.170, 0.120, 'pants'],
+  [0.064, 0.166, 0.112, 'top'], [0.10, 0.160, 0.104, 'top'], [0.134, 0.160, 0.104, 'top'],
+  [0.140, 0.186, 0.130, 'vest'], [0.186, 0.196, 0.137, 'vest'], [0.190, 0.202, 0.142, 'trim'], [0.216, 0.205, 0.144, 'trim'], [0.220, 0.200, 0.140, 'vest'],
+  [0.335, 0.216, 0.149, 'vest'], [0.415, 0.207, 0.143, 'vest'], [0.452, 0.165, 0.118, 'vest'],
+  [0.458, 0.150, 0.100, 'top'], [0.492, 0.085, 0.070, 'top'], [0.500, 0.056, 0.056, 'skin'], [0.585, 0.050, 0.050, 'skin'], [0.60, 0.002, 0.002, 'skin'],
+];
+// конечность: путь из четырёх точек (плечо, локоть, запястье, кончики пальцев или бедро, колено, щиколотка, носок).
+// rad — радиус по пути: [координата пути 0..3, радиус]; split — с какой координаты начинается перчатка или ботинок.
+const ARM_SPEC = { rad: [[0, 0.060], [1, 0.047], [1.9, 0.036], [2.3, 0.045], [3, 0.036]], split: 1.93, a: 'top', b: 'glove', f1: 0.07, f2: 0.02 };
+const LEG_SPEC = { rad: [[0, 0.092], [1, 0.066], [1.92, 0.047], [2.25, 0.053], [3, 0.046]], split: 1.82, a: 'pants', b: 'boot', f1: 0.09, f2: 0.045 };
+const LIMB_RINGS = 3 + 2 + 5 + 2 + 4 + 2 + 2;
+function makeBody(colors) {
+  const S = BODY_SIDES, nRings = TORSO_RINGS.length + 4 * LIMB_RINGS, nV = nRings * S;
+  const pos = new Float32Array(nV * 3), col = new Float32Array(nV * 3), idx = [];
+  const C = {}; for (const k in colors) C[k] = new THREE.Color(colors[k]);
+  // каждая часть — свой отрезок колец; между частями треугольников нет
+  const parts = [TORSO_RINGS.length, LIMB_RINGS, LIMB_RINGS, LIMB_RINGS, LIMB_RINGS];
+  let r0 = 0;
+  for (const n of parts) {
+    for (let i = 0; i < n - 1; i++) for (let j = 0; j < S; j++) {
+      const a = (r0 + i) * S + j, b = (r0 + i) * S + (j + 1) % S, c = a + S, d = b + S;
+      idx.push(a, b, c, b, d, c);
+    }
+    r0 += n;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.76 }));
+  mesh.castShadow = true; mesh.frustumCulled = false;
+  const cs = [], sn = []; for (let j = 0; j < S; j++) { cs.push(Math.cos(j / S * Math.PI * 2)); sn.push(Math.sin(j / S * Math.PI * 2)); }
+  let ring = 0, hidden = 0;
+  const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3(), c0 = new THREE.Vector3(), d1 = new THREE.Vector3(), d2 = new THREE.Vector3(), d3 = new THREE.Vector3();
+  const A1 = new THREE.Vector3(), A2 = new THREE.Vector3(), B1 = new THREE.Vector3(), B2 = new THREE.Vector3(), tmp = new THREE.Vector3();
+  // кольцо с центром c, осями n и b, радиусами ra и rb, цветом color
+  function put(c, n, b, ra, rb, color) {
+    let o = ring * S * 3;
+    for (let j = 0; j < S; j++, o += 3) {
+      const x = cs[j] * ra, y = sn[j] * rb;
+      pos[o] = c.x + n.x * x + b.x * y; pos[o + 1] = c.y + n.y * x + b.y * y; pos[o + 2] = c.z + n.z * x + b.z * y;
+      col[o] = color.r; col[o + 1] = color.g; col[o + 2] = color.b;
+    }
+    ring++;
+  }
+  const radAt = (spec, w) => { const r = spec.rad; for (let i = 1; i < r.length; i++) if (w <= r[i][0]) { const u = (w - r[i - 1][0]) / (r[i][0] - r[i - 1][0]); return r[i - 1][1] + (r[i][1] - r[i - 1][1]) * Math.max(0, u); } return r[r.length - 1][1]; };
+  // кольцо конечности: касательная t задана, нормаль переносится с предыдущего кольца без закручивания
+  function limbRing(c, t, w, spec, hide, scale = 1) {
+    N.addScaledVector(t, -N.dot(t)); if (N.lengthSq() < 1e-8) N.set(t.y, -t.x, 0); N.normalize();
+    B.crossVectors(t, N);
+    const r = hide ? 0.0005 : radAt(spec, w) * scale;
+    // скрытые кольца стягиваются в центр первого видимого: срез получается плоским, без острия
+    if (!hide && hidden > 0) { for (let o = (ring - hidden) * S * 3; o < ring * S * 3; o += 3) { pos[o] = c.x; pos[o + 1] = c.y; pos[o + 2] = c.z; } hidden = 0; }
+    if (hide) hidden++;
+    put(c, N, B, r, r, C[w < spec.split ? spec.a : spec.b]);
+  }
+  // hideTo — координата пути, до которой часть скрыта (вид из глаз: плечо и верх руки не рисуются)
+  function limb(p0, p1, p2, p3, spec, pole, hideTo = -1) {
+    d1.subVectors(p1, p0); const L1 = d1.length() || 1e-4; d1.divideScalar(L1);
+    d2.subVectors(p2, p1); const L2 = d2.length() || 1e-4; d2.divideScalar(L2);
+    d3.subVectors(p3, p2); const L3 = d3.length() || 1e-4; d3.divideScalar(L3);
+    const f1 = Math.min(spec.f1, L1 * 0.45, L2 * 0.4), f2 = Math.min(spec.f2, L2 * 0.4, L3 * 0.45);
+    A1.copy(p1).addScaledVector(d1, -f1); A2.copy(p1).addScaledVector(d2, f1);       // скругление первого сустава
+    B1.copy(p2).addScaledVector(d2, -f2); B2.copy(p2).addScaledVector(d3, f2);       // и второго
+    N.crossVectors(d1, d2); if (N.lengthSq() < 1e-6) N.copy(pole);                    // ось сгиба: кольца не закручиваются
+    const hid = (w) => w < hideTo; hidden = 0;
+    const rs = radAt(spec, 0);
+    // закруглённое начало
+    limbRing(c0.copy(p0).addScaledVector(d1, -rs * 0.7), d1, 0, spec, hid(0), 0.03);
+    limbRing(c0.copy(p0).addScaledVector(d1, -rs * 0.4), d1, 0, spec, hid(0), 0.78);
+    limbRing(c0.copy(p0), d1, 0, spec, hid(0));
+    for (const u of [0.5, 1]) limbRing(c0.copy(p0).lerp(A1, u), d1, u * (1 - f1 / L1), spec, hid(u * (1 - f1 / L1)));
+    for (const t of [0.2, 0.4, 0.6, 0.8, 1]) {
+      const k = 1 - t;
+      c0.set(k * k * A1.x + 2 * k * t * p1.x + t * t * A2.x, k * k * A1.y + 2 * k * t * p1.y + t * t * A2.y, k * k * A1.z + 2 * k * t * p1.z + t * t * A2.z);
+      T.copy(d1).lerp(d2, t).normalize();
+      const w = 1 + (t - 0.5) * 0.3; limbRing(c0, T, w, spec, hid(w));
+    }
+    for (const u of [0.5, 1]) { const w = 1.15 + u * (0.85 - f2 / L2); limbRing(c0.copy(A2).lerp(B1, u), d2, w, spec, hid(w)); }
+    for (const t of [0.25, 0.5, 0.75, 1]) {
+      const k = 1 - t;
+      c0.set(k * k * B1.x + 2 * k * t * p2.x + t * t * B2.x, k * k * B1.y + 2 * k * t * p2.y + t * t * B2.y, k * k * B1.z + 2 * k * t * p2.z + t * t * B2.z);
+      T.copy(d2).lerp(d3, t).normalize();
+      limbRing(c0, T, 2 + (t - 0.5) * 0.2, spec, false);
+    }
+    for (const u of [0.5, 1]) limbRing(c0.copy(B2).lerp(p3, u), d3, 2.1 + u * 0.9, spec, false);
+    const re = radAt(spec, 3);
+    limbRing(c0.copy(p3).addScaledVector(d3, re * 0.45), d3, 3, spec, false, 0.75);
+    limbRing(c0.copy(p3).addScaledVector(d3, re * 0.75), d3, 3, spec, false, 0.03);
+  }
+  // торс: жёсткий, вдоль dir от таза; ax — линия плеч
+  function torso(hip, dir, ax, hide) {
+    N.copy(ax).addScaledVector(dir, -ax.dot(dir)).normalize(); B.crossVectors(dir, N);
+    for (const [t, a, b, c] of TORSO_RINGS) put(tmp.copy(hip).addScaledVector(dir, hide ? 0 : t), N, B, hide ? 0.0005 : a, hide ? 0.0005 : b, C[c]);
+  }
+  return {
+    mesh, torso, limb,
+    begin() { ring = 0; },
+    end() { geo.attributes.position.needsUpdate = true; geo.attributes.color.needsUpdate = true; geo.computeVertexNormals(); },
+  };
 }
+
 // Парус просвечивает: сторона, обращённая от солнца, получает часть прошедшего сквозь ткань света
 function backlit(mat) {
   mat.onBeforeCompile = (sh) => {
@@ -636,15 +733,10 @@ export function createBoat(env0 = null) {
   const sailor = new THREE.Group(); heelG.add(sailor);
   const addM = (geo, mat, shadow = true) => { const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; sailor.add(m); return m; };
   const lathe = (pts) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), 20);
-  const pelvis = addM(new THREE.SphereGeometry(1, 18, 14), pants); pelvis.scale.set(0.19, 0.125, 0.16);
-  // торс: бёдра → талия → грудь → плечи (локальная ось X — линия плеч)
-  const torso = addM(lathe([[0.02, -0.02], [0.13, 0.0], [0.142, 0.07], [0.136, 0.15], [0.15, 0.25], [0.168, 0.34], [0.16, 0.42], [0.11, 0.475], [0.055, 0.5], [0.0, 0.505]]), topMat);
-  torso.scale.set(1.16, 1, 0.74);
-  const vestM = addM(lathe([[0.0, 0.135], [0.158, 0.14], [0.172, 0.24], [0.186, 0.335], [0.178, 0.415], [0.13, 0.465], [0.08, 0.485], [0.0, 0.49]]), vest);
-  vestM.scale.set(1.16, 1, 0.80);
-  const vestBand = addM(new THREE.TorusGeometry(0.168, 0.016, 8, 28), vestTrim, false); vestBand.scale.set(1.16, 1, 0.80);
-  const shoulderL = addM(new THREE.SphereGeometry(0.072, 14, 10), topMat, false), shoulderR = addM(new THREE.SphereGeometry(0.072, 14, 10), topMat, false);
-  const neck = addM(new THREE.CylinderGeometry(0.048, 0.056, 0.1, 14), skin, false);
+  // тело — одна оболочка; голова с кепкой и очками отдельно
+  const body = makeBody({ pants: '#14181f', top: '#1d2b45', vest: '#ff5700', trim: '#141414', skin: '#c99474', glove: '#1b1b1b', boot: '#1b1b1b' });
+  sailor.add(body.mesh);
+  let firstPerson = false;
   const headG = new THREE.Group(); sailor.add(headG);
   const addH = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); headG.add(m); return m; };
   const headM = addH(new THREE.SphereGeometry(0.102, 22, 18), skin, 0, 0, 0); headM.scale.set(1, 1.1, 0.94); headM.castShadow = true;
@@ -653,15 +745,6 @@ export function createBoat(env0 = null) {
   const capDome = addH(new THREE.SphereGeometry(0.108, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2), capMat, 0, 0.028, 0); capDome.scale.set(1, 0.92, 0.96);
   const visor = addH(new THREE.CylinderGeometry(0.105, 0.105, 0.01, 20, 1, false, 0, Math.PI), capMat, 0.055, 0.034, 0); visor.scale.set(1, 1, 0.9);
   addH(new THREE.BoxGeometry(0.03, 0.036, 0.172), new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.25, metalness: 0.5 }), 0.086, 0.012, 0);   // очки
-  const thighL = limb(pants, 0.088, 0.066), thighR = limb(pants, 0.088, 0.066), shinL = limb(pants, 0.062, 0.046), shinR = limb(pants, 0.062, 0.046);
-  const kneeL = addM(new THREE.SphereGeometry(0.068, 12, 10), pants, false), kneeR = addM(new THREE.SphereGeometry(0.068, 12, 10), pants, false);
-  const upArmA = limb(topMat, 0.056, 0.046), foreArmA = limb(topMat, 0.046, 0.036), upArmB = limb(topMat, 0.056, 0.046), foreArmB = limb(topMat, 0.046, 0.036);
-  const elbowA = addM(new THREE.SphereGeometry(0.047, 10, 8), topMat, false), elbowB = addM(new THREE.SphereGeometry(0.047, 10, 8), topMat, false);
-  const handA = addM(new THREE.SphereGeometry(0.044, 12, 10), bootMat, false), handB = addM(new THREE.SphereGeometry(0.044, 12, 10), bootMat, false);   // перчатки
-  handA.scale.set(1.15, 0.8, 1); handB.scale.set(1.15, 0.8, 1);
-  const bootGeo = new THREE.CapsuleGeometry(0.047, 0.15, 6, 10); bootGeo.rotateZ(Math.PI / 2); bootGeo.translate(0.055, 0, 0);
-  const footL = addM(bootGeo, bootMat), footR = addM(bootGeo, bootMat);
-  [thighL, thighR, shinL, shinR, upArmA, foreArmA, upArmB, foreArmB].forEach(o => sailor.add(o));
   const handSheet = rope(heelG, matRope, 0.008, 2);
   const handPts = [new THREE.Vector3(), new THREE.Vector3()], handSag = [0];
   // статичные детали — в один меш на материал
@@ -771,23 +854,19 @@ export function createBoat(env0 = null) {
     const dir = P.tmp.set(-0.06 + 0.3 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
     P.headP.copy(P.hip).addScaledVector(dir, 0.655); P.headP.x += 0.03; P.headP.y -= 0.03 * crouch; P.headP.z -= sv * 0.03;
-    _q.setFromUnitVectors(Y, dir);
-    pelvis.position.copy(P.hip); pelvis.quaternion.copy(_q);
-    torso.position.copy(P.hip); torso.quaternion.copy(_q);
-    vestM.position.copy(P.hip); vestM.quaternion.copy(_q);
-    vestBand.position.copy(P.hip).addScaledVector(dir, 0.2); vestBand.quaternion.copy(_q).multiply(_q2.setFromAxisAngle(_xAxis, Math.PI / 2));
-    neck.position.copy(P.hip).addScaledVector(dir, 0.53); neck.quaternion.copy(_q);
+    body.begin();
+    body.torso(P.hip, dir, _xAxis, firstPerson);
     // голова: смотрит вперёд, при откренивании — вверх на парус
     headG.position.copy(P.headP);
     headG.rotation.set(0, sv * 0.35 * (1 - h * 0.4), 0.1 + 0.3 * h);
     // плечи
     const shA = tv().copy(P.shoulder); shA.x -= 0.165; shA.y -= 0.02; shA.z += sv * 0.02;      // заднее
     const shB = tv().copy(P.shoulder); shB.x += 0.165; shB.y -= 0.02; shB.z += sv * 0.02;      // переднее
-    shoulderL.position.copy(shA); shoulderR.position.copy(shB);
     // ноги: двухзвенная кинематика. Стопы под ремнём откренивания, колено сгибается вверх;
     // чем дальше матрос вывешивается, тем прямее ноги.
     const poleLeg = tv().set(0.25 * crouch, 1, sv * 0.25);
-    for (const [thigh, shin, knee, foot, off] of [[thighL, shinL, kneeL, footL, 0.12], [thighR, shinR, kneeR, footR, -0.12]]) {
+    const toeA = 0.5 * (1 - crouch), toeS = sv >= 0 ? -1 : 1;   // носок вверх и к середине лодки, под ремень
+    for (const off of [0.12, -0.12]) {
       const hipJ = tv().copy(P.hip); hipJ.x += off * 0.85; hipJ.y -= 0.03; hipJ.z -= sv * 0.07;
       const ft = tv().set(SS.x + off * 1.25 + 0.05, floorY + 0.075, THREE.MathUtils.clamp(lateral - sv * 0.62, -0.13, 0.13) - sv * 0.02 * (1 - crouch));
       clampReach(hipJ, ft, THIGH + SHIN - 0.015);
@@ -795,9 +874,8 @@ export function createBoat(env0 = null) {
       // колено не ниже палубы: бедро лежит на борту
       const deckK = deckAt(P.knee.x) + (cockpitSDF(P.knee.x, P.knee.z) < 0 ? -COCKPIT.depth : 0) + 0.085;
       if (P.knee.y < deckK) P.knee.y = deckK;
-      thigh.userData.set(hipJ, P.knee); shin.userData.set(P.knee, ft);
-      knee.position.copy(P.knee);
-      foot.position.copy(ft); foot.rotation.set(0, sv >= 0 ? Math.PI / 2 : -Math.PI / 2, 0.5 * (1 - crouch));   // носок вверх, под ремень
+      const toe = tv().set(ft.x, ft.y + Math.sin(toeA) * 0.19, ft.z + toeS * Math.cos(toeA) * 0.19);
+      body.limb(hipJ, P.knee, ft, toe, LEG_SPEC, poleLeg);
     }
     // руки: кисть не дальше вытянутой руки
     const REACH = ARM1 + ARM2 - 0.02;
@@ -814,8 +892,11 @@ export function createBoat(env0 = null) {
     clampReach(shB, P.handB, REACH);
     solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-0.4, -1, sv * 0.6), P.elbowA);
     solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2, -1, sv * 0.3), P.elbowB);
-    upArmA.userData.set(shA, P.elbowA); foreArmA.userData.set(P.elbowA, P.handA); elbowA.position.copy(P.elbowA); handA.position.copy(P.handA);
-    upArmB.userData.set(shB, P.elbowB); foreArmB.userData.set(P.elbowB, P.handB); elbowB.position.copy(P.elbowB); handB.position.copy(P.handB);
+    for (const [sh, el, hd] of [[shA, P.elbowA, P.handA], [shB, P.elbowB, P.handB]]) {
+      const fd = tv().subVectors(hd, el).normalize();
+      body.limb(sh, el, tv().copy(hd).addScaledVector(fd, -0.05), tv().copy(hd).addScaledVector(fd, 0.06), ARM_SPEC, _xAxis, firstPerson ? 0.45 : -1);
+    }
+    body.end();
     // удлинитель румпеля направлен на точку хвата, длина постоянная
     const local = rudderPivot.worldToLocal(heelG.localToWorld(tv().copy(pivotHull).addScaledVector(toWant, EXT_LEN)));
     const d = local.sub(extPivot.position);
@@ -883,7 +964,6 @@ export function createBoat(env0 = null) {
   let sailorEnabled = true;
   const headWorld = (v) => headG.getWorldPosition(v);
   // вид из глаз: голова и корпус матроса скрыты, руки и ноги остаются в кадре
-  const fpHide = [headG, neck, pelvis, torso, vestM, vestBand, shoulderL, shoulderR, upArmA, upArmB];
-  const setHead = (v) => { for (const m of fpHide) (m.mesh || m).visible = v; };
+  const setHead = (v) => { headG.visible = v; firstPerson = !v; };
   return { root, heelG, rig, sea, headWorld, setHead, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
 }
