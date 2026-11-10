@@ -154,6 +154,12 @@ function setAutoTrim(v) {
   for (const id of trimIds) { $(id).disabled = v; if (!v) ctl[id] = state.trim[id]; }
 }
 $('autoTrim').addEventListener('change', (e) => setAutoTrim(e.target.checked));
+// уроки сами включают ручные настройки и выставляют их: панель подстраивается под то, что стоит в управлении
+function syncTrimUI() {
+  $('autoTrim').checked = ctl.autoTrim; setText('trim-mode', ctl.autoTrim ? 'авто' : 'вручную');
+  for (const id of trimIds) { $(id).disabled = ctl.autoTrim; if (!ctl.autoTrim) $(id).value = Math.round(ctl[id] * 100); }
+  if (!ctl.autoTrim) $('trim').open = true;
+}
 for (const id of trimIds) $(id).addEventListener('input', (e) => { ctl[id] = +e.target.value / 100; });
 $('gusts').addEventListener('change', (e) => { if (raceLocked() || lessons.run.status === 'running') { e.target.checked = false; toast('В уроках и гонке ветер ровный'); return; } ctl.gusts = e.target.checked; });
 
@@ -340,7 +346,9 @@ const passed = new Set(JSON.parse(localStorage.getItem('laser3d.passed') || '[]'
 function savePassed() { try { localStorage.setItem('laser3d.passed', JSON.stringify([...passed])); } catch (e) {} }
 function renderLessonList() {
   const box = $('lesson-list'); box.innerHTML = '';
+  let group = null;
   LESSONS.forEach((L, i) => {
+    if (L.group && L.group !== group) { group = L.group; const hd = document.createElement('div'); hd.className = 'lesson-group'; hd.textContent = group; box.appendChild(hd); }
     const b = document.createElement('button'); b.className = 'lesson' + (passed.has(L.id) ? ' passed' : '') + (mode === 'lesson' && lessons.run.index === i ? ' active' : '');
     b.innerHTML = `<span class="n">${passed.has(L.id) ? '✓' : i + 1}</span><span>${L.title}</span>`;
     b.addEventListener('click', () => { startLesson(i); $('panel').classList.remove('open'); });
@@ -549,6 +557,8 @@ function updateUI(out, dt) {
   setText('v-heading', `${Math.round(state.heading)}°`);
   setText('v-twa', `${Math.round(Math.abs(out.TWA))}° к ветру`);
   if (document.activeElement !== ui.heading) ui.heading.value = Math.round(state.heading);
+  if ($('autoTrim').checked !== ctl.autoTrim) syncTrimUI();
+  if (mode === 'lesson' && +ui.windSpeed.value !== ctl.windSpeed) ui.windSpeed.value = ctl.windSpeed;
   for (const id of trimIds) {
     const pc = Math.round((ctl.autoTrim ? state.trim[id] : ctl[id]) * 100);
     setText('v-' + id, pc + '%'); if (ctl.autoTrim && document.activeElement !== el(id)) el(id).value = pc;

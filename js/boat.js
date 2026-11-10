@@ -843,7 +843,7 @@ export function createBoat(env0 = null) {
   //  • галфвинд/бакштаг — сидит на наветренном борту, при глиссировании смещается в корму
   //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
   //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
-  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0, sgn: 0, flip: 0, swap: 1 };
+  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0, sgn: 0, flip: 0, swap: 1, duck: 0 };
   // временные векторы кадра: берутся из пула, память в кадре не выделяется
   const pool = []; let poolI = 0;
   const tv = () => pool[poolI++] || (pool[poolI - 1] = new THREE.Vector3());
@@ -882,10 +882,32 @@ export function createBoat(env0 = null) {
     P.hip.set(SS.x, dy + 0.07 - 0.03 * crouch, lateral);
     const theta = SS.theta * (1 - crouch) + 0.1 * crouch;
     const dir = P.tmp.set(-0.06 + 1.5 * crouch, Math.cos(theta), sv * Math.sin(theta)).normalize();
+    // Гик идёт на высоте головы сидящего матроса. Когда он проходит над матросом (поворот, полощущий парус),
+    // матрос пригибается: наклоняет корпус вперёд ровно настолько, чтобы голова прошла под гиком.
+    {
+      const boomY = mastBase.y + BOOM_H - 0.05, headTop = P.hip.y + 0.655 * dir.y + 0.15;
+      let near = 0;
+      for (const ahead of [0, 0.22]) {                       // сейчас и с упреждением: гик летит быстро
+        const b = (state.boom + state.boomRate / DEG * ahead) * DEG, cb = Math.cos(b);
+        const along = (mastBase.x - (P.hip.x + 0.25)) / Math.max(0.2, cb);      // где гик проходит над головой
+        if (cb > 0.15 && along > 0.15 && along < BOOM_L + 0.1) {
+          const dz = Math.abs(P.hip.z + dir.z * 0.6 - along * Math.sin(b));
+          near = Math.max(near, 1 - THREE.MathUtils.smoothstep(dz, 0.24, 0.55));
+        }
+      }
+      const need = Math.max(0, Math.min(0.45, headTop - boomY)) * near;
+      SS.duck += (need - SS.duck) * Math.min(1, dt * (need > SS.duck ? 16 : 5));
+      if (SS.duck > 0.005) {
+        // наклон вперёд на угол, при котором голова опускается на нужную высоту
+        const c = Math.max(0.25, 1 - SS.duck / (0.655 * Math.max(0.3, dir.y)));
+        dir.x += Math.tan(Math.acos(c)) * dir.y; dir.normalize();
+      }
+    }
+    const duckK = Math.min(1, SS.duck / 0.12);
     P.shoulder.copy(P.hip).addScaledVector(dir, 0.46);
     // Шея: когда корпус лежит за бортом или наклонён вперёд при переходе, голова не продолжает линию спины,
     // а поднята: матрос смотрит вперёд, на нос и парус.
-    const lift = Math.max(h * (1 - crouch), crouch);
+    const lift = Math.max(h * (1 - crouch), crouch) * (1 - 0.8 * duckK);        // пригнувшись, голову не задирает
     const neck = P.neck.copy(dir); neck.x += (0.2 * h - 0.25 * crouch) * lift; neck.y += 0.85 * lift; neck.z -= sv * 0.3 * h * (1 - crouch); neck.normalize();
     P.headP.copy(P.hip).addScaledVector(dir, NECK_T).addScaledVector(neck, 0.655 - NECK_T); P.headP.x += 0.03; P.headP.z -= sv * 0.03 * (1 - h);
     // Линия плеч: сидя — вдоль лодки, при переходе — поперёк. Матрос поворачивается лицом к носу: плечо руки,
