@@ -188,7 +188,6 @@ export class VectorArrow {
     this.group = new THREE.Group();
     this.shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 16), mat);   // масштабируется
     this.head = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 24), mat);
-    this.shaft.castShadow = true; this.head.castShadow = true;
     this.group.add(this.shaft); this.group.add(this.head);
     scene.add(this.group);
     this.canvas = document.createElement("canvas"); this.canvas.width = 420; this.canvas.height = 72;

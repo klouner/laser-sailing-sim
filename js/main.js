@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createBoat, HULL } from './boat.js';
 import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
-import { createState, defaultControls, step, norm180, norm360, compassName, optimalSheet, KN } from './physics.js';
+import { createState, defaultControls, step, norm180, norm360, compassName, optimalSheet, KN, PHYS_DT } from './physics.js';
 import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
 import { LESSONS, createLessonRunner } from './lessons.js';
@@ -14,10 +14,16 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- рендер ----------
 const canvas = $('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Профиль качества: на телефоне дешевле тени и нет двойного сглаживания (при плотности ≥2 оно почти не видно)
+const isTouch = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
+const QUALITY = isTouch
+  ? { maxDpr: Math.min(window.devicePixelRatio || 1, 2), minDpr: 1, shadow: 1024, soft: false, antialias: (window.devicePixelRatio || 1) < 2 }
+  : { maxDpr: Math.min(window.devicePixelRatio || 1, 2), minDpr: 1, shadow: 2048, soft: true, antialias: true };
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: QUALITY.antialias, powerPreference: 'high-performance' });
+let dpr = QUALITY.maxDpr;
+renderer.setPixelRatio(dpr);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = QUALITY.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -38,7 +44,7 @@ const sunDir = new THREE.Vector3(0.45, 0.6, -0.65).normalize();
 const sun = new THREE.DirectionalLight('#fff4e0', 2.6);
 sun.position.copy(sunDir).multiplyScalar(40);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow);
 sun.shadow.camera.near = 5; sun.shadow.camera.far = 90;
 sun.shadow.camera.left = -12; sun.shadow.camera.right = 12; sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -12;
 sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
@@ -85,21 +91,21 @@ const lessons = createLessonRunner();
 const state = createState();
 const ctl = defaultControls();
 ctl.heading = state.heading;
-const isTouch = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
 const show = { trueWind: true, appWind: true, vel: true, force: true, noGo: true, streaks: true, labels: !isTouch, sailor: true };
 $('showLabels').checked = show.labels;
 let camMode = 'chase';
 const keys = {};
 let autopilot = null; // { target }
+let holdTarget = null; // курс, который матрос держит при отпущенном руле
 const drawMinimap = createMinimap($('minimap'));
 
 // ---------- UI ----------
 const ui = {
   windFrom: $('windFrom'), windSpeed: $('windSpeed'), heading: $('heading'), sheet: $('sheet'), rudder: $('rudder'),
-  autoSheet: $('autoSheet'), lockHeading: $('lockHeading'), rudderReturn: $('rudderReturn'),
+  autoSheet: $('autoSheet'), lockHeading: $('lockHeading'), rudderReturn: $('rudderReturn'), holdCourse: $('holdCourse'),
 };
 const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
-function setRudder(v) { ctl.rudder = THREE.MathUtils.clamp(v, -35, 35); ui.rudder.value = Math.round(ctl.rudder); autopilot = null; }
+function setRudder(v) { ctl.rudder = THREE.MathUtils.clamp(v, -35, 35); ui.rudder.value = Math.round(ctl.rudder); autopilot = null; holdTarget = null; }
 function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, 0, 90); ui.sheet.value = Math.round(ctl.sheet); ctl.autoSheet = false; ui.autoSheet.checked = false; $('t-auto').classList.remove('active'); }
 function setWindFrom(v) { ctl.windFrom = ((v % 360) + 360) % 360; ui.windFrom.value = Math.round(ctl.windFrom); }
 function setAutoSheet(v) { if (v && (raceLocked() || lessons.run.status === 'running')) { toast('Автошкот недоступен в уроках и гонке'); v = false; } ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
@@ -107,9 +113,9 @@ function setAutoSheet(v) { if (v && (raceLocked() || lessons.run.status === 'run
 const raceLocked = () => course.race.active && course.race.phase !== 'finished';
 ui.windFrom.addEventListener('input', () => { if (raceLocked()) { ui.windFrom.value = ctl.windFrom; return; } ctl.windFrom = +ui.windFrom.value; if (devCompass.on) setCompass(false); });
 ui.windSpeed.addEventListener('input', () => { if (raceLocked()) { ui.windSpeed.value = ctl.windSpeed; return; } ctl.windSpeed = +ui.windSpeed.value; });
-ui.heading.addEventListener('input', () => { if (raceLocked() || lessons.run.status === 'running') { ui.heading.value = Math.round(state.heading); return; } state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; });
+ui.heading.addEventListener('input', () => { if (raceLocked() || lessons.run.status === 'running') { ui.heading.value = Math.round(state.heading); return; } state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; holdTarget = null; });
 ui.sheet.addEventListener('input', () => { setSheet(+ui.sheet.value); });
-ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autopilot = null; });
+ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autopilot = null; holdTarget = null; });
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
 ui.autoSheet.addEventListener('change', () => { setAutoSheet(ui.autoSheet.checked); });
 ui.lockHeading.addEventListener('change', () => { ctl.lockHeading = ui.lockHeading.checked; });
@@ -179,7 +185,7 @@ function updateCompass(dt) {
   $('compassState').textContent = `— ${Math.round(devCompass.smooth)}°`;
 }
 $('btn-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
-$('hud').addEventListener('click', () => $('hud').classList.toggle('min'));
+$('hud').addEventListener('click', () => { $('hud').classList.toggle('min'); layoutDirty = true; });
 
 // ---------- сенсорное управление ----------
 // встроенные браузеры (Telegram, VK, Instagram) тянут страницу при вертикальном свайпе — глушим жесты вне прокручиваемой панели
@@ -216,10 +222,18 @@ $('t-windL').addEventListener('click', () => setWindFrom(ctl.windFrom - 10));
 $('t-windR').addEventListener('click', () => setWindFrom(ctl.windFrom + 10));
 // закрыть шторку тапом по сцене
 canvas.addEventListener('pointerdown', () => $('panel').classList.remove('open'));
+const padGeom = { tw: 36, trackW: 200, tsz: 36, trackH: 100, left: '', top: '' };
+const thumbR = $('t-rudder-thumb'), thumbS = $('t-sheet-thumb');
+function measurePads() {
+  padGeom.tw = thumbR.offsetWidth || 36; padGeom.trackW = thumbR.parentElement.clientWidth || 200;
+  padGeom.tsz = thumbS.offsetHeight || 36; padGeom.trackH = thumbS.parentElement.clientHeight || 100;
+}
 function updateTouch() {
-  const th = $('t-rudder-thumb'); const tw = th.offsetWidth || 36; th.style.left = (50 + ctl.rudder / 35 * 50 * (1 - tw / Math.max(tw, th.parentElement.clientWidth))) + '%';
-  const ts = $('t-sheet-thumb'); const trk = ts.parentElement; const tsz = ts.offsetHeight || 36; const usable = Math.max(1, trk.clientHeight - tsz);
-  ts.style.top = (tsz / 2 + ctl.sheetShown / 90 * usable) + 'px';
+  const left = (50 + ctl.rudder / 35 * 50 * (1 - padGeom.tw / Math.max(padGeom.tw, padGeom.trackW))).toFixed(2) + '%';
+  if (left !== padGeom.left) { padGeom.left = left; thumbR.style.left = left; }
+  const usable = Math.max(1, padGeom.trackH - padGeom.tsz);
+  const top = (padGeom.tsz / 2 + ctl.sheetShown / 90 * usable).toFixed(1) + 'px';
+  if (top !== padGeom.top) { padGeom.top = top; thumbS.style.top = top; }
 }
 
 function togglePause() {
@@ -231,7 +245,7 @@ function togglePause() {
 }
 function reset() {
   const s = createState();
-  Object.assign(state, s);
+  Object.assign(state, s); holdTarget = null;
   state.heading = 90; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null;
   ctl.sheet = 45; ui.sheet.value = 45;
   if (camMode !== 'free') setCamera(camMode);
@@ -253,8 +267,19 @@ function handleKeys(dt) {
   const inS = keys.ArrowUp || keys.KeyW, outS = keys.ArrowDown || keys.KeyS;
   if (left || right) { autopilot = null; ctl.rudder = THREE.MathUtils.clamp(ctl.rudder + (right ? 1 : -1) * 70 * dt, -35, 35); ui.rudder.value = Math.round(ctl.rudder); }
   else if (ui.rudderReturn.checked && !autopilot && !padActive && document.activeElement !== ui.rudder) {
-    const k = Math.min(1, dt * 5); ctl.rudder += (0 - ctl.rudder) * k; if (Math.abs(ctl.rudder) < 0.3) ctl.rudder = 0; ui.rudder.value = Math.round(ctl.rudder);
+    if (ui.holdCourse.checked && !ctl.paused && !ctl.lockHeading && !state.capsized) {
+      // матрос удерживает курс: видно, какой руль нужен, чтобы лодка не приводилась
+      if (holdTarget === null) holdTarget = state.heading + state.yawRate * 0.35;
+      const err = norm180(holdTarget - state.heading);
+      if (Math.abs(err) > 50) holdTarget = state.heading;
+      const want = THREE.MathUtils.clamp(err * 1.3 - state.yawRate * 0.35, -18, 18);
+      ctl.rudder += (want - ctl.rudder) * Math.min(1, dt * 8);
+    } else {
+      const k = Math.min(1, dt * 5); ctl.rudder += (0 - ctl.rudder) * k; if (Math.abs(ctl.rudder) < 0.3) ctl.rudder = 0;
+    }
+    ui.rudder.value = Math.round(ctl.rudder);
   }
+  if (left || right || padActive || autopilot || document.activeElement === ui.rudder || ctl.lockHeading || state.capsized) holdTarget = null;
   if (inS || outS) { ctl.autoSheet = false; ui.autoSheet.checked = false; ctl.sheet = THREE.MathUtils.clamp(ctl.sheet + (outS ? 1 : -1) * 40 * dt, 0, 90); ui.sheet.value = Math.round(ctl.sheet); }
 }
 
@@ -279,7 +304,7 @@ function renderLessonList() {
 }
 let gustsBefore = null;
 function resetForTraining() {
-  const s = createState(); Object.assign(state, s);
+  const s = createState(); Object.assign(state, s); holdTarget = null; physAcc = 0;
   if (gustsBefore === null) gustsBefore = ctl.gusts;
   ctl.gusts = false; $('gusts').checked = false;
   ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
@@ -305,7 +330,7 @@ function startRace() {
   course.start(state, ctl);
   ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
   tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
-  tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Два буя'; tb.goal.textContent = 'Обогни оранжевый наветренный буй (110 м против ветра) и вернись к синему. Таймер пошёл после отсчёта.';
+  tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Два буя'; tb.goal.textContent = 'Обогни оранжевый буй (110 м против ветра): пройди выше него и вернись с другой стороны. Финиш между синими буями.';
   tb.note.textContent = ''; tb.fill.style.width = '0%'; tb.time.textContent = '';
   renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading; showGoal(6000);
   toast('3', true, 900);
@@ -329,13 +354,13 @@ $('btn-course').addEventListener('click', () => {
   // свободная тренировка на трассе: буи видны, лодка на старте, ветер с севера, без таймера
   lessons.stop(ctl); course.stop(); mode = 'free'; tb.bar.hidden = true;
   const s = createState(); Object.assign(state, s);
-  state.x = -14; state.z = 8; state.heading = 45; state.vf = 1.5;
+  state.x = 0; state.z = 12; state.heading = 45; state.vf = 1.5; holdTarget = null;
   ctl.windFrom = 0; ui.windFrom.value = 0; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
   if (ctl.paused) togglePause();
   course.showCourse(true); renderLessonList();
   setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading;
   $('panel').classList.remove('open');
-  toast('Буи на воде: оранжевый — 110 м против ветра, синий — у старта', false, 3500);
+  toast('Буи на воде: оранжевый в 110 м против ветра, синие ворота у старта', false, 3500);
 });
 $('t-train').addEventListener('click', () => { $('panel').classList.add('open'); $('card-train').scrollIntoView({ block: 'start' }); });
 renderLessonList();
@@ -377,10 +402,12 @@ function updateTraining(out, dt, t) {
     }
     const ev = course.update(state, ctl, dt, t);
     if (ev === 'go') { ctl.paused = false; toast('СТАРТ!', true, 1200); $('btn-pause').textContent = 'Пауза'; $('t-pause').textContent = '⏸'; }
-    if (ev === 'rounded') toast('Буй обогнут — теперь вниз, к синему', false, 2500);
+    if (ev === 'rounded') toast('Буй обогнут! Теперь по ветру, финиш между синими буями', false, 2800);
+    if (ev === 'notRounded') toast('Буй не обогнут: пройдите выше него и вернитесь с другой стороны', false, 3200);
+    if (ev === 'missedGate') toast('Мимо ворот: финиш между синими буями', false, 2800);
     if (r.phase === 'leg1' || r.phase === 'leg2') {
       tb.time.textContent = fmtTime(r.t);
-      tb.note.textContent = `${r.phase === 'leg1' ? 'К оранжевому бую' : 'К синему бую'} · ${Math.round(r.dist)} м · пеленг ${Math.round(r.bearing)}°`;
+      tb.note.textContent = `${r.phase === 'leg1' ? 'К оранжевому бую' : 'К финишным воротам'} · ${Math.round(r.dist)} м · пеленг ${Math.round(r.bearing)}°`;
       const legLen = 110; const p = r.phase === 'leg1' ? 0.5 * (1 - Math.min(1, r.dist / legLen)) : 0.5 + 0.5 * (1 - Math.min(1, r.dist / legLen));
       tb.fill.style.width = (p * 100).toFixed(1) + '%';
     }
@@ -404,7 +431,7 @@ function updateTraining(out, dt, t) {
     if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; }
   }
 }
-window.__sim = { state, ctl, course, lessons, startRace, startLesson };
+window.__sim = { state, ctl, course, lessons, startRace, startLesson, renderer, scene, get dpr() { return dpr; } };
 
 // ---------- камера ----------
 const camOffset = new THREE.Vector3();
@@ -443,83 +470,121 @@ setCamera('chase');
 
 // ---------- панель: вывод ----------
 let uiAcc = 0;
+const elCache = new Map(), textCache = new Map();
+const el = (id) => { let e = elCache.get(id); if (!e) { e = document.getElementById(id); elCache.set(id, e); } return e; };
+function setText(id, text) { if (textCache.get(id) !== text) { textCache.set(id, text); el(id).textContent = text; } }
+let narrow = window.innerWidth < 420;
 function updateUI(out, dt) {
   uiAcc += dt; if (uiAcc < 0.1) return; uiAcc = 0;
-  $('v-windFrom').textContent = `${Math.round(ctl.windFrom)}°` + (ctl.gusts && Math.abs(out.windFrom - ctl.windFrom) > 2 ? ` (сейчас ${Math.round(norm360(out.windFrom))}°)` : '');
-  $('v-windName').textContent = compassName(ctl.windFrom);
-  $('v-windSpeed').textContent = `${fmt(ctl.windSpeed, 1)} уз` + (ctl.gusts ? ` (сейчас ${fmt(out.windKn, 1)})` : '');
-  $('v-heading').textContent = `${Math.round(state.heading)}°`;
-  $('v-twa').textContent = `${Math.round(Math.abs(out.TWA))}° к ветру`;
+  setText('v-windFrom', `${Math.round(ctl.windFrom)}°` + (ctl.gusts && Math.abs(out.windFrom - ctl.windFrom) > 2 ? ` (сейчас ${Math.round(norm360(out.windFrom))}°)` : ''));
+  setText('v-windName', compassName(ctl.windFrom));
+  setText('v-windSpeed', `${fmt(ctl.windSpeed, 1)} уз` + (ctl.gusts ? ` (сейчас ${fmt(out.windKn, 1)})` : ''));
+  setText('v-heading', `${Math.round(state.heading)}°`);
+  setText('v-twa', `${Math.round(Math.abs(out.TWA))}° к ветру`);
   if (document.activeElement !== ui.heading) ui.heading.value = Math.round(state.heading);
-  $('v-sheet').textContent = `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' (авто)' : '');
+  setText('v-sheet', `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' (авто)' : ''));
   if (ctl.autoSheet) ui.sheet.value = Math.round(out.sheet);
   const r = Math.round(ctl.rudder);
-  $('v-rudder').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо →' : '← влево'}`;
-  $('t-rudder-val').textContent = r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо' : 'влево'}`;
-  $('t-sheet-val').textContent = `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' авто' : '');
-  $('t-windChip').textContent = `Ветер ${Math.round(norm360(out.windFrom))}° ${compassName(out.windFrom)} · ${fmt(out.windKn, 0)} уз`;
+  setText('v-rudder', r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо →' : '← влево'}`);
+  setText('t-rudder-val', r === 0 ? 'прямо' : `${Math.abs(r)}° ${r > 0 ? 'вправо' : 'влево'}`);
+  setText('t-sheet-val', `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' авто' : ''));
+  setText('t-windChip', `Ветер ${Math.round(norm360(out.windFrom))}° ${compassName(out.windFrom)} · ${fmt(out.windKn, 0)} уз`);
   if (document.activeElement !== ui.rudder) ui.rudder.value = r;
 
-  $('pos-name').textContent = out.pos.name;
-  $('tack-name').textContent = window.innerWidth < 420 ? `${out.tack} · ${Math.round(out.twaAbs)}° к ветру` : `${out.tack} · ${out.pos.desc} · ${Math.round(out.twaAbs)}° к ветру`;
+  setText('pos-name', out.pos.name);
+  setText('tack-name', narrow ? `${out.tack} · ${Math.round(out.twaAbs)}° к ветру` : `${out.tack} · ${out.pos.desc} · ${Math.round(out.twaAbs)}° к ветру`);
   // подсказка меняется не чаще, чем раз в 0.6 с, чтобы не мигала при быстрых действиях
   if (out.hint !== updateUI.pendingHint) { updateUI.pendingHint = out.hint; updateUI.pendingSince = performance.now(); }
   if (out.hint !== updateUI.shownHint && performance.now() - updateUI.pendingSince > 600) {
-    updateUI.shownHint = out.hint; const hint = $('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
+    updateUI.shownHint = out.hint; const hint = el('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
   }
 
-  $('s-speed').textContent = `${fmt(out.speedKn)} уз`;
-  $('speed-big').textContent = fmt(out.speedKn);
-  $('vmg-big').textContent = `${fmt(Math.abs(out.vmgKn))} ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`;
-  const vmg = out.vmgKn;
-  $('s-vmg').textContent = `${fmt(Math.abs(vmg))} уз ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`;
-  $('s-aws').textContent = `${fmt(out.AWS / KN, 1)} уз · ${Math.round(out.awaAbs)}°`;
-  $('s-aoa').textContent = `${Math.round(out.aoa)}°`;
-  $('s-heel').textContent = `${Math.round(Math.abs(state.heel))}° ${state.heel > 0.5 ? 'на левый борт' : state.heel < -0.5 ? 'на правый борт' : ''}`;
-  $('s-leeway').textContent = `${fmt(Math.abs(out.leeway), 1)}°`;
-  const sail = $('s-sail'); sail.textContent = `${out.sailState} · ${Math.round(out.Fmag)} Н`; sail.className = out.sailClass;
+  setText('s-speed', `${fmt(out.speedKn)} уз`);
+  setText('speed-big', fmt(out.speedKn));
+  const vmgTxt = `${fmt(Math.abs(out.vmgKn))} ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`;
+  setText('vmg-big', vmgTxt);
+  setText('s-vmg', `${fmt(Math.abs(out.vmgKn))} уз ${out.twaAbs < 90 ? 'к ветру' : 'по ветру'}`);
+  setText('s-aws', `${fmt(out.AWS / KN, 1)} уз · ${Math.round(out.awaAbs)}°`);
+  setText('s-aoa', `${Math.round(out.aoa)}°`);
+  setText('s-heel', `${Math.round(Math.abs(state.heel))}° ${state.heel > 0.5 ? 'на левый борт' : state.heel < -0.5 ? 'на правый борт' : ''}`);
+  setText('s-leeway', `${fmt(Math.abs(out.leeway), 1)}°`);
+  const sailTxt = `${out.sailState} · ${Math.round(out.Fmag)} Н`;
+  if (textCache.get('s-sail') !== sailTxt + out.sailClass) { textCache.set('s-sail', sailTxt + out.sailClass); const sail = el('s-sail'); sail.textContent = sailTxt; sail.className = out.sailClass; }
 }
 
 // ---------- цикл ----------
 const clock = new THREE.Clock();
 let t = 0;
 let labelK = 1;
-let lastOffsetY = -1;
-function layoutOverlays(w) {
+let lastOffsetY = null;
+let hudVisible = true;
+// Раскладка пересчитывается только когда что-то изменило размер (окно, шапка, пульт), а не каждый кадр
+let layoutDirty = true;
+const markLayout = () => { layoutDirty = true; };
+window.addEventListener('resize', markLayout); window.addEventListener('orientationchange', markLayout);
+if ('ResizeObserver' in window) { const ro = new ResizeObserver(markLayout); ro.observe($('topbar')); ro.observe($('touch')); ro.observe(canvas); ro.observe($('hud')); }
+setInterval(markLayout, 1500); // страховка для браузеров без ResizeObserver и для смены классов
+function layoutOverlays(w, h) {
+  narrow = w < 420;
+  measurePads();
+  const topbarBottom = $('topbar').getBoundingClientRect().bottom;
   // лодка — в центре свободной области между шапкой и сенсорным пультом
-  const h = canvas.clientHeight;
+  let offY = 0;
   if (w < 900 || w / h < 0.9) {
-    const top = $('topbar').getBoundingClientRect().bottom;
     const touch = $('touch'); const tr = touch.getBoundingClientRect();
     const bottom = (getComputedStyle(touch).display !== 'none' && tr.height > 0) ? tr.top : h;
-    const centerY = (top + bottom) / 2;
-    const offY = Math.round(THREE.MathUtils.clamp(h / 2 - centerY, -h * 0.2, h * 0.3));
-    if (offY !== lastOffsetY) { lastOffsetY = offY; camera.setViewOffset(w, h, 0, offY, w, h); camera.updateProjectionMatrix(); }
-  } else if (lastOffsetY !== 0) { lastOffsetY = 0; camera.clearViewOffset(); camera.updateProjectionMatrix(); }
+    offY = Math.round(THREE.MathUtils.clamp(h / 2 - (topbarBottom + bottom) / 2, -h * 0.2, h * 0.3));
+  }
+  if (offY !== lastOffsetY) {
+    lastOffsetY = offY;
+    if (offY) camera.setViewOffset(w, h, 0, offY, w, h); else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+  }
   const k = THREE.MathUtils.clamp(w / 1100, 0.5, 1);
   if (Math.abs(k - labelK) > 0.01) {
     labelK = k; setLabelScale(compass, k);
     for (const a of Object.values(arrows)) a.setLabelScale(k);
   }
   const hud = $('hud');
-  if (w < 900) { const r = $('topbar').getBoundingClientRect(); hud.style.top = Math.round(r.bottom + 8) + 'px'; $('lb').style.top = hud.style.top; }
+  if (w < 900) { hud.style.top = Math.round(topbarBottom + 8) + 'px'; $('lb').style.top = hud.style.top; }
   else { hud.style.top = ''; $('lb').style.top = ''; }
+  hudVisible = getComputedStyle(hud).display !== 'none' && !hud.classList.contains('min');
 }
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  layoutOverlays(w);
-  if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
-    renderer.setSize(w, h, false); camera.aspect = w / h; const portrait = w / h < 0.9; camera.fov = portrait ? 68 : 50;
-    if (portrait) camera.setViewOffset(w, h, 0, Math.round(h * 0.07), w, h); else camera.clearViewOffset();
+  if (!w || !h) return;
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    renderer.setPixelRatio(dpr); renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.fov = w / h < 0.9 ? 68 : 50;
+    lastOffsetY = null;            // смещение кадра зависит от размера — пересчитать
     camera.updateProjectionMatrix();
+  }
+  layoutOverlays(w, h);
+}
+// Адаптивное разрешение: если кадры идут медленно, плавно снижаем плотность пикселей; при запасе — возвращаем
+const perf = { acc: 0, n: 0, slow: 0, fast: 0, cap: QUALITY.maxDpr };
+function adaptQuality(rawDt) {
+  if (document.hidden || rawDt > 0.25) return;      // вкладка была свёрнута — не считаем
+  perf.acc += rawDt; perf.n++;
+  if (perf.acc < 1) return;
+  const avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0;
+  if (avg > 1 / 42) { perf.slow++; perf.fast = 0; } else if (avg < 1 / 56) { perf.fast++; perf.slow = 0; } else { perf.slow = 0; perf.fast = 0; }
+  if (perf.slow >= 2 && dpr > QUALITY.minDpr) {
+    perf.cap = Math.min(perf.cap, dpr);              // выше этого уровня больше не поднимаемся без долгого запаса
+    dpr = Math.max(QUALITY.minDpr, +(dpr - 0.25).toFixed(2)); perf.slow = 0; layoutDirty = true;
+  } else if (perf.fast >= 8 && dpr < perf.cap - 0.01) {
+    dpr = Math.min(perf.cap, +(dpr + 0.25).toFixed(2)); perf.fast = 0; layoutDirty = true;
   }
 }
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 
+let mapAcc = 1, physAcc = 0, lastGybeSeen = -1;
 function frame() {
   requestAnimationFrame(frame);
-  resize();
-  const dt = Math.min(0.05, clock.getDelta());
+  const rawDt = clock.getDelta();
+  adaptQuality(rawDt);
+  if (layoutDirty) { layoutDirty = false; resize(); }
+  const dt = Math.min(0.05, rawDt);
   t += dt;
   handleKeys(dt);
   updateCompass(dt);
@@ -527,15 +592,20 @@ function frame() {
   // автопилот (оверштаг / фордевинд)
   if (autopilot) {
     const err = norm180(autopilot.target - state.heading);
-    ctl.rudder = THREE.MathUtils.clamp(err * 1.6, -35, 35);
+    ctl.rudder = THREE.MathUtils.clamp(err * 1.4 - state.yawRate * 0.3, -20, 20);
     ui.rudder.value = Math.round(ctl.rudder);
     if (Math.abs(err) < 2.5 && Math.abs(state.yawRate) < 6) { autopilot = null; ctl.rudder = 0; ui.rudder.value = 0; }
   }
 
-  // физика с подшагами
-  let out;
-  const sub = 3;
-  for (let i = 0; i < sub; i++) out = step(state, ctl, dt / sub);
+  // физика с фиксированным шагом 120 Гц: поведение лодки не зависит от частоты кадров
+  physAcc = Math.min(physAcc + dt, PHYS_DT * 8);
+  let out = state.out;
+  while (physAcc >= PHYS_DT) { out = step(state, ctl, PHYS_DT, null); physAcc -= PHYS_DT; }
+  if (!out || out.AWS === undefined) out = step(state, ctl, 0, null);
+  if (state.lastGybe.time !== lastGybeSeen) {
+    lastGybeSeen = state.lastGybe.time;
+    if (state.lastGybe.kick > 14) toast(state.lastGybe.kick > 28 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
+  }
   updateTraining(out, dt, t);
 
   // сцена
@@ -573,7 +643,8 @@ function frame() {
   updateTouch();
   updateCamera(dt);
   updateUI(out, dt);
-  drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.L, color: '#0047ff', active: course.race.phase === 'leg2' }] } : null);
+  mapAcc += dt;
+  if (hudVisible && mapAcc >= 0.05) { mapAcc = 0; drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.G1, color: '#0047ff', active: course.race.phase === 'leg2' }, { ...course.marks.G2, color: '#0047ff', active: course.race.phase === 'leg2' }] } : null); }
   renderer.render(scene, camera);
 }
 

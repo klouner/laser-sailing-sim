@@ -28,7 +28,7 @@ export const LESSONS = [
     goal: 'Идёшь в бейдевинд левым галсом. Поверни носом через ветер и ляг в бейдевинд правым галсом (40–65° к ветру), сохранив ход 2 узла.',
     setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.heading = 45; state.vf = 2.5; ctl.sheet = 15; state.side = -1; },
     check(out, state, el) {
-      if (state.vf < 0.3 && el > 2) return { fail: 'Застрял в левентике — поворот надо делать решительно, с ходом, руль на 25–30°. Ещё раз!' };
+      if (state.vf < 0.3 && el > 2) return { fail: 'Застрял в левентике: поворот делают с хода и плавно, руль 15–20°. Круче не надо, перо сорвёт поток и затормозит. Ещё раз!' };
       const crossed = out.TWA > 0; // ветер теперь справа
       const p = crossed ? 0.6 + 0.4 * Math.min(1, out.speedKn / 2) : 0.6 * Math.min(1, Math.max(0, (out.twaAbs < 45 ? 45 - out.twaAbs : 0) / 45));
       return { progress: p, done: crossed && out.twaAbs >= 40 && out.twaAbs <= 65 && out.speedKn >= 2, note: crossed ? 'Галс сменён — разгоняйся' : 'Приводись к ветру и проходи через левентик' };
@@ -36,7 +36,7 @@ export const LESSONS = [
   },
   {
     id: 'gybe', title: 'Поворот фордевинд',
-    goal: 'Идёшь бакштагом левым галсом. Уваливайся, пока ветер не перейдёт через корму и гик не перелетит, затем ляг в бакштаг правым галсом (130–160°) с ходом 2 узла.',
+    goal: 'Идёшь бакштагом левым галсом. Подбери шкот наполовину, увались, чтобы ветер перешёл через корму и гик перелетел, затем потрави шкот и ляг в бакштаг правым галсом (130–160°) с ходом 2 узла.',
     setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.heading = 150; state.vf = 2.5; ctl.sheet = 80; state.side = -1; },
     check(out, state, el) {
       const crossed = out.TWA > 0;
@@ -48,7 +48,7 @@ export const LESSONS = [
     id: 'beat', title: 'Лавировка к бую',
     goal: 'Наветренный буй в 110 м прямо против ветра. Дойди до него галсами: держи 45° к ветру, меняй галс оверштагом. Следи за VMG.',
     usesCourse: 'W',
-    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.x = 0; state.z = 0; state.heading = 45; state.vf = 2; ctl.sheet = 15; },
+    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.x = 0; state.z = 12; state.heading = 45; state.vf = 2; ctl.sheet = 15; },
     check(out, state, el, mem, course) {
       const d = Math.hypot(course.marks.W.x - state.x, course.marks.W.z - state.z);
       mem.d0 = mem.d0 || d;

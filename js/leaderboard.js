@@ -1,7 +1,7 @@
 // Таблица лидеров: localStorage по умолчанию; общий вариант — свой сервер (server/) либо публичный JSON-блоб (jsonblob.com)
 import { LEADERBOARD_URL, GFORM } from './config.js';
 
-const KEY = 'laser3d.leaderboard', NAME_KEY = 'laser3d.name';
+const KEY = 'laser3d.leaderboard.v2', NAME_KEY = 'laser3d.name';
 const sortTrim = (list, n = 10) => (Array.isArray(list) ? list : []).filter(e => e && typeof e.time === 'number' && e.time > 20 && e.time < 3600).sort((a, b) => a.time - b.time).slice(0, n);
 const isBlob = /jsonblob\.com\/api\/jsonBlob\//.test(LEADERBOARD_URL);
 export const isShared = !!LEADERBOARD_URL || !!GFORM;
@@ -20,28 +20,31 @@ function parseCSV(text) {
   if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
   return rows;
 }
+// Формат строки рекорда: в текстовой колонке «Имя» — «Имя | 151.2 §2».
+// Время дублируется в имени, потому что Google определяет колонку «Время» как числовую и отбрасывает текстовые значения.
+// §2 — версия физики: после изменения модели лодки старые результаты несравнимы и в таблицу не попадают.
+const TAG = '§2';
 async function gformGet() {
-  const r = await fetch(GFORM.csv + (GFORM.csv.includes('?') ? '&' : '?') + '_=' + Date.now(), { cache: 'no-store' });
+  const q = encodeURIComponent(`select A,B where B ends with '${TAG}'`);
+  const r = await fetch(GFORM.csv + (GFORM.csv.includes('?') ? '&' : '?') + 'tq=' + q + '&_=' + Date.now(), { cache: 'no-store' });
   if (!r.ok) throw new Error('csv ' + r.status);
   const rows = parseCSV(await r.text());
-  if (!rows.length) return [];
-  // ищем колонки по заголовкам, иначе берём 2-ю и 3-ю (после отметки времени)
-  const head = rows[0].map(s => s.toLowerCase());
-  let iN = head.findIndex(s => s.includes('имя') || s.includes('name')), iT = head.findIndex(s => s.includes('время') || s.includes('time')), iD = head.findIndex(s => s.includes('отметка') || s.includes('timestamp'));
-  if (iN < 0) iN = 1; if (iT < 0) iT = 2; if (iD < 0) iD = 0;
-  // формат: либо отдельная колонка времени, либо «Имя | 151.2» в одной ячейке
-  const list = rows.slice(1).filter(r => !String(r[iN] || '').trim().startsWith('#')).map(r => {
-    let name = String(r[iN] || '').trim(), time = parseFloat(String(r[iT] || '').replace(',', '.'));
-    const sep = name.lastIndexOf('|');
-    if (sep >= 0) { const t2 = parseFloat(name.slice(sep + 1).trim().replace(',', '.')); if (!isNaN(t2)) { time = t2; name = name.slice(0, sep).trim(); } }
-    return { name: name.slice(0, 18) || 'Без имени', time, date: String(r[iD] || '').slice(0, 10) };
-  });
+  const list = [];
+  for (const row of rows.slice(1)) {
+    let cell = String(row[1] || '').trim();
+    if (!cell.endsWith(TAG) || cell.startsWith('#')) continue;
+    cell = cell.slice(0, -TAG.length).trim();
+    const sep = cell.lastIndexOf('|'); if (sep < 0) continue;
+    const time = parseFloat(cell.slice(sep + 1).trim().replace(',', '.'));
+    if (isNaN(time)) continue;
+    list.push({ name: cell.slice(0, sep).trim().slice(0, 18) || 'Без имени', time, date: String(row[0] || '').slice(0, 10) });
+  }
   return sortTrim(list, 50);
 }
 async function gformSubmit(entry) {
   const fd = new FormData();
-  if (GFORM.timeEntry) { fd.append(GFORM.nameEntry, entry.name); fd.append(GFORM.timeEntry, String(entry.time)); }
-  else fd.append(GFORM.nameEntry, `${entry.name.replace(/\|/g, '/')} | ${entry.time}`);
+  fd.append(GFORM.nameEntry, `${entry.name.replace(/[|§#]/g, ' ').trim()} | ${entry.time} ${TAG}`);
+  if (GFORM.timeEntry) fd.append(GFORM.timeEntry, String(entry.time).replace('.', ','));
   await fetch(GFORM.action, { method: 'POST', mode: 'no-cors', body: fd });
   await new Promise(res => setTimeout(res, 1800));
   try { const list = await gformGet(); if (!list.some(e => e.name === entry.name && Math.abs(e.time - entry.time) < 0.05)) list.push(entry); return sortTrim(list); } catch (e) { return null; }

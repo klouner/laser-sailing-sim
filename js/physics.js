@@ -9,7 +9,9 @@ export const BOAT = {
   rhoAir: 1.225,
   ceHeight: 2.2,    // высота центра парусности над ватерлинией, м
   rudderRate: 110,  // максимальная скорость перекладки руля, град/с
+  rudderStall: 22,  // угол, после которого перо срывает поток, град
 };
+export const PHYS_DT = 1 / 120;       // фиксированный шаг интегрирования, с
 
 export function norm180(a) { a = ((a + 180) % 360 + 360) % 360 - 180; return a; }
 export function norm360(a) { return ((a % 360) + 360) % 360; }
@@ -42,6 +44,9 @@ export function createState() {
     hike: 0,               // откренивание экипажа 0..1 (реакция на крен)
     board: 1,              // шверт: 1 — опущен, 0.5 — наполовину поднят
     capsized: 0,           // таймер оверкиля (0 — нет)
+    heelKick: 0,           // затухающий кренящий толчок от перелёта гика, град
+    gybe: null,            // незавершённый перелёт гика { travel }
+    lastGybe: { time: -1, kick: 0 }, // последний удар гика (для подсказки)
     gust: { speed: 0, dir: 0, t: 0, seed: Math.random() * 1000 },
     time: 0,
     out: {},
@@ -79,7 +84,8 @@ function gustNoise(t, seed) {
   return { speed: s, dir: d }; // примерно −1..1
 }
 
-export function step(state, ctl, dt) {
+// Один шаг физики. env (необязательно) — порыв в точке лодки: { gustSpeed, gustDir } в диапазоне −1..1.
+export function step(state, ctl, dt, env = null) {
   const psi = state.heading * DEG;
   const fx = Math.sin(psi), fz = -Math.cos(psi);     // вперёд
   const sx = Math.cos(psi), sz = Math.sin(psi);      // правый борт
@@ -87,10 +93,12 @@ export function step(state, ctl, dt) {
   // ---- ветер с порывами ----
   let windKn = ctl.windSpeed, windFrom = ctl.windFrom;
   if (ctl.gusts) {
-    const g = gustNoise(state.time, state.gust.seed);
-    state.gust.speed = g.speed; state.gust.dir = g.dir;
-    windKn = Math.max(1, ctl.windSpeed * (1 + 0.22 * g.speed));
-    windFrom = ctl.windFrom + 9 * g.dir;
+    let gs, gd;
+    if (env) { gs = env.gustSpeed; gd = env.gustDir; }
+    else { const g = gustNoise(state.time, state.gust.seed); gs = g.speed; gd = g.dir; }
+    state.gust.speed = gs; state.gust.dir = gd;
+    windKn = Math.max(1, ctl.windSpeed * (1 + 0.22 * gs));
+    windFrom = ctl.windFrom + 9 * gd;
   } else { state.gust.speed = 0; state.gust.dir = 0; }
   const Vw = windKn * KN;
   const phi = windFrom * DEG;
@@ -119,34 +127,49 @@ export function step(state, ctl, dt) {
   const boomTarget = -side * boomMag;
   const luffing = awaAbs < sheet + 1.5 && AWS > 0.3;
   const aoa = Math.max(0, awaAbs - boomMag);
+  const q = 0.5 * BOAT.rhoAir * AWS * AWS;
 
-  // ---- силы на парусе (с учётом крена: наклонённый парус теряет эффективную площадь) ----
+  // ветер перешёл через корму: гик начинает перелёт на другой борт
+  if (prevSide !== side && awaAbs > 100 && !state.capsized) state.gybe = { travel: Math.abs(boomTarget - state.boom) };
+  // пока гик в полёте, парус почти не тянет
+  const transit = state.gybe ? Math.min(1, Math.abs(boomTarget - state.boom) / Math.max(20, state.gybe.travel)) : 0;
+  const sailPower = 1 - 0.85 * transit;
+
+  // ---- силы на парусе (накренённый парус теряет эффективную площадь) ----
   const heelRad = Math.abs(state.heel) * DEG;
   const heelEff = Math.pow(Math.cos(heelRad), 1.3);
-  const q = 0.5 * BOAT.rhoAir * AWS * AWS;
   const { CL, CD } = sailCoeffs(aoa);
-  let Ff = 0, Fs = 0;
+  let Ff = 0, Fs = 0, yawSail = 0;
   if (AWS > 0.05) {
     const flF = -afF / AWS, flS = -afS / AWS;        // направление потока
-    // подъёмная сила ⊥ потоку, направлена в сторону подветренной поверхности паруса (нормаль к хорде, «от ветра»)
+    // подъёмная сила ⊥ потоку, направлена в сторону подветренной поверхности паруса
     const bm = boomMag * DEG, bz = -side;               // гик вынесен под ветер
     const cF = -Math.cos(bm), cS = bz * Math.sin(bm);    // хорда паруса (от мачты к шкотовому углу)
-    let nF = -cS, nS = cF;                                // нормаль к хорде
-    if (nF * afF + nS * afS > 0) { nF = -nF; nS = -nS; }  // выбираем подветренную нормаль
+    let nF = -cS, nS = cF;
+    if (nF * afF + nS * afS > 0) { nF = -nF; nS = -nS; }
     let lF = -flS, lS = flF;
     if (lF * nF + lS * nS < 0) { lF = -lF; lS = -lS; }
     const clEff = luffing ? CL * 0.05 : CL;
     const cdEff = luffing ? 0.12 : CD;
-    Ff = q * BOAT.sailArea * heelEff * (clEff * lF + cdEff * flF);
-    Fs = q * BOAT.sailArea * heelEff * (clEff * lS + cdEff * flS);
+    const k = q * BOAT.sailArea * heelEff * sailPower;
+    Ff = k * (clEff * lF + cdEff * flF);
+    Fs = k * (clEff * lS + cdEff * flS);
+    // Руление парусом: центр парусности относительно центра бокового сопротивления.
+    // Подобранный парус (ЦП в корме) приводит лодку, вынесенный за борт гик разворачивает её тягой на плече.
+    const ceX = 1.0 - 1.05 * Math.cos(bm);            // вперёд от ЦБС, м
+    const ceZ = bz * 1.05 * Math.sin(bm);             // к правому борту, м
+    yawSail = 0.02 * (ceX * Fs - ceZ * Ff);           // град/с, + = вправо
   }
 
-  // ---- руль с инерцией перекладки ----
+  // ---- руль: инерция перекладки и срыв потока на больших углах ----
   const dr = ctl.rudder - state.rudder;
   const maxStep = BOAT.rudderRate * dt;
   state.rudder += Math.max(-maxStep, Math.min(maxStep, dr));
+  const rAbs = Math.abs(state.rudder), ST = BOAT.rudderStall;
+  const rudderEff = Math.sign(state.rudder) * (rAbs <= ST ? rAbs : ST - (rAbs - ST) * 0.55);
+  const rudderStalled = rAbs > ST + 2;
 
-  // ---- шверт: на попутных курсах приподнимаем (меньше смоченная поверхность, меньше «зацеп») ----
+  // ---- шверт: на попутных курсах приподнят ----
   const twaAbs0 = Math.abs(TWA);
   const boardTarget = twaAbs0 > 150 ? 0.45 : twaAbs0 > 110 ? 0.7 : 1;
   state.board += (boardTarget - state.board) * Math.min(1, dt * 0.8);
@@ -154,16 +177,19 @@ export function step(state, ctl, dt) {
   // ---- сопротивление корпуса ----
   const v = state.vf;
   const hump = Math.exp(-Math.pow((Math.abs(v) - 2.9) / 0.75, 2));
-  const rudderDrag = 1 + 0.6 * Math.abs(state.rudder) / 35;
+  const rudderDrag = 1 + 0.35 * Math.pow(rAbs / 35, 2) + (rAbs > ST ? 1.1 * Math.pow((rAbs - ST) / (35 - ST), 2) : 0);
   const heelDrag = 1 + 0.8 * Math.pow(Math.abs(state.heel) / 30, 2);     // накренённый корпус тормозит
   const k2 = (9 + 22 * hump) * rudderDrag * heelDrag;
-  const dragF = -(6 * v + k2 * v * Math.abs(v));
-  const aF = (Ff + dragF) / BOAT.mass;
-  const latK = 900 * (0.4 + 0.6 * state.board) * (1 - 0.5 * Math.pow(Math.abs(state.heel) / 45, 2)); // крен и поднятый шверт → больше дрейф
+  const leewayDrag = 60 * state.vs * state.vs;                           // дрейф тоже стоит скорости
+  const dragF = -(6 * v + k2 * v * Math.abs(v) + leewayDrag * Math.sign(v || 1));
+  const aF = (Ff + dragF) / (BOAT.mass * 1.15);                          // с присоединённой массой воды
+  // Боковое сопротивление: шверт и руль — это крылья, они держат только на ходу (сила ∝ скорости хода).
+  // Без хода остаётся лишь сопротивление корпуса, и лодку сносит боком.
+  const foil = 600 * Math.abs(v) * (0.35 + 0.65 * state.board) * (1 - 0.35 * Math.pow(Math.abs(state.heel) / 45, 2));
+  const latK = 140 + 180 * Math.abs(state.vs) + foil;
   const aS = (Fs - latK * state.vs) / BOAT.mass;
 
   // ---- экипаж: откренивание ----
-  // матрос вывешивается пропорционально кренящей силе; его момент держит лодку плоской до ~Fs≈220 Н
   const hikeTarget = Math.min(1, Math.max(0, (Math.abs(Fs) - 50) / 170));
   const capsized = state.capsized > 0;
 
@@ -176,20 +202,30 @@ export function step(state, ctl, dt) {
 
     let yaw = 0;
     if (!ctl.lockHeading) {
-      yaw = state.rudder * (0.42 * state.vf + 0.03);
+      yaw = rudderEff * (0.42 * state.vf + 0.03);
       yaw += side * 0.10 * Math.abs(state.heel) * Math.min(1, state.vf / 0.8); // накренённая лодка приводится
+      yaw += yawSail;
     }
     state.yawRate += (yaw - state.yawRate) * Math.min(1, dt * 6);
     state.heading = norm360(state.heading + state.yawRate * dt);
 
+    state.boom += (boomTarget - state.boom) * Math.min(1, dt * 5);
+    // гик долетел: удар по крену и рывок к ветру, тем сильнее, чем длиннее полёт и свежее ветер
+    if (state.gybe && Math.abs(boomTarget - state.boom) < 0.2 * Math.max(20, state.gybe.travel)) {
+      const kick = Math.min(60, 0.0062 * q * state.gybe.travel);
+      state.heelKick += side * kick;
+      if (!ctl.lockHeading) state.yawRate += side * kick * 0.9;
+      state.lastGybe = { time: state.time, kick };
+      state.gybe = null;
+    }
+    state.heelKick *= Math.exp(-dt / 0.6);
+
     // крен: кренящий момент против восстанавливающего (корпус + матрос)
-    const righting = 1 + 1.25 * state.hike;                 // откренивание экипажа усиливает остойчивость
+    const righting = 1 + 1.25 * state.hike;
     const heelMag = Math.min(80, Math.abs(Fs) * 0.11 / righting);
-    const heelTarget = side * heelMag + state.yawRate * 0.15; // крен под ветер (+ = на левый борт при ветре справа); центробежный — наружу поворота
+    const heelTarget = side * heelMag + state.yawRate * 0.15 + state.heelKick * 3.0;
     state.heel += (heelTarget - state.heel) * Math.min(1, dt * 1.6);
     if (Math.abs(state.heel) > 58) state.capsized = 0.01;
-
-    state.boom += (boomTarget - state.boom) * Math.min(1, dt * 5);
 
     state.x += Vx * dt;
     state.z += Vz * dt;
@@ -197,10 +233,11 @@ export function step(state, ctl, dt) {
   } else if (!ctl.paused && capsized) {
     // оверкиль: лодка лежит на борту, останавливается, через 4 с матрос ставит её на ровный киль
     state.capsized += dt;
+    state.gybe = null; state.heelKick = 0;
     state.vf *= Math.max(0, 1 - dt * 2); state.vs *= Math.max(0, 1 - dt * 2);
     state.heel += (side * 82 - state.heel) * Math.min(1, dt * 2);
     state.boom += (boomTarget - state.boom) * Math.min(1, dt * 5);
-    if (state.capsized > 4) { state.capsized = 0; state.heel = side * 10; state.heading = norm360(windFrom + side * 70); state.hike = 0; }
+    if (state.capsized > 4) { state.capsized = 0; state.heel = side * 10; state.heading = norm360(windFrom + side * 70); state.hike = 0; state.yawRate = 0; }
     state.time += dt;
   }
 
@@ -210,6 +247,7 @@ export function step(state, ctl, dt) {
   const vmgKn = speedKn * Math.cos(TWA * DEG);
   const leeway = Math.atan2(state.vs, Math.max(0.2, state.vf)) / DEG;
   const overpowered = Math.abs(state.heel) > 26 && state.hike > 0.95;
+  const sliding = Math.abs(state.vs) > 0.3 && state.vf < 0.8 && Math.abs(Fs) > 40;
 
   let sailState, sailClass, hint, hintClass;
   if (capsized) {
@@ -224,9 +262,15 @@ export function step(state, ctl, dt) {
   } else if (overpowered) {
     sailState = 'перегружен'; sailClass = 'bad';
     hint = 'Перегруз: матрос откренивает до предела, крен растёт. Потравите шкот или приведитесь, иначе оверкиль.'; hintClass = 'bad';
+  } else if (rudderStalled && state.vf > 0.8) {
+    sailState = 'руль тормозит'; sailClass = 'warn';
+    hint = 'Руль переложен слишком круто: перо срывает поток и тормозит. Достаточно 15–20°, поворачивайте плавно.'; hintClass = 'warn';
+  } else if (sliding) {
+    sailState = 'сносит боком'; sailClass = 'warn';
+    hint = 'Нет хода: шверт не держит, лодку сносит боком. Чуть увалитесь и потравите шкот, чтобы разогнаться.'; hintClass = 'warn';
   } else if (awaAbs > 135) {
     if (sheet < 75) { sailState = 'недотравлен'; sailClass = 'warn'; hint = 'Попутный ветер: потравите шкот до упора, чтобы парус встал поперёк ветра.'; hintClass = 'warn'; }
-    else { sailState = 'работает как парашют'; sailClass = 'good'; hint = twaAbs > 165 ? 'Фордевинд: матрос у центра, шверт приподнят. Осторожно: гик может перелететь.' : 'Бакштаг: парус раскрыт до упора и тянет сопротивлением, шверт приподнят.'; hintClass = twaAbs > 165 ? 'warn' : 'good'; }
+    else { sailState = 'работает как парашют'; sailClass = 'good'; hint = twaAbs > 165 ? 'Фордевинд: матрос у центра, шверт приподнят. Перед поворотом подберите шкот, иначе гик ударит.' : 'Бакштаг: парус раскрыт до упора и тянет сопротивлением, шверт приподнят.'; hintClass = twaAbs > 165 ? 'warn' : 'good'; }
   } else if (luffing || aoa < 5) {
     sailState = 'заполаскивает'; sailClass = 'bad';
     hint = 'Парус заполаскивает у передней шкаторины: шкот перетравлен. Подберите шкот, пока он не наполнится.'; hintClass = 'bad';
@@ -243,16 +287,16 @@ export function step(state, ctl, dt) {
     hint = 'Бакштаг: гик до упора, парус тянет сопротивлением. Матрос на наветренном борту, в глиссировании в корме.'; hintClass = 'good';
   } else if (aoa <= 40) {
     sailState = 'перебран'; sailClass = 'warn';
-    hint = 'Шкот перебран: подветренный колдунчик обвис, поток срывается, крен растёт. Потравите шкот.'; hintClass = 'warn';
+    hint = 'Шкот перебран: подветренный колдунчик обвис, поток срывается, лодка приводится. Потравите шкот.'; hintClass = 'warn';
   } else {
     sailState = 'срыв потока'; sailClass = 'bad';
     hint = 'Срыв потока: парус почти поперёк ветра. Потравите шкот до угла атаки 15–20°.'; hintClass = 'bad';
   }
 
   state.out = {
-    AWS, AWA, TWA, twaAbs, awaAbs, aoa, sheet, boomTarget, luffing, overpowered, capsized,
+    AWS, AWA, TWA, twaAbs, awaAbs, aoa, sheet, boomTarget, luffing, overpowered, capsized, rudderStalled, sliding,
     windKn, windFrom, gustSpeed: state.gust.speed, gustDir: state.gust.dir,
-    Ff, Fs, Fmag: Math.hypot(Ff, Fs), CL, CD, q,
+    Ff, Fs, Fmag: Math.hypot(Ff, Fs), CL, CD, q, yawSail,
     speedKn, vmgKn, leeway, pos, tack: side > 0 ? 'правый галс' : 'левый галс',
     tackShort: side > 0 ? 'ПРАВЫЙ' : 'ЛЕВЫЙ', sideChanged: prevSide !== side,
     sailState, sailClass, hint, hintClass,

@@ -291,23 +291,79 @@ function limb(mat, r) {
   g.userData.set = (a, b) => { const d = b.clone().sub(a); const L = d.length(); g.position.copy(a); g.quaternion.setFromUnitVectors(Y, d.normalize()); cyl.scale.y = L; cyl.position.y = L / 2; };
   return g;
 }
-// Трос: ломаная по точкам; sags[i] — провисание i-го отрезка (м, вниз по y)
-function rope(parent, mat, r = 0.0075) {
-  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
-  mesh.castShadow = false; parent.add(mesh);
-  return (points, sags = null) => {
-    const path = new THREE.CurvePath();
-    let segs = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i], c = points[i + 1], s = sags ? (sags[i] || 0) : 0;
-      if (s > 0.004) {
-        const ctrl = a.clone().lerp(c, 0.5); ctrl.y -= 2 * s; // квадратичная Безье: провис в середине = s
-        path.add(new THREE.QuadraticBezierCurve3(a, ctrl, c)); segs += 8;
-      } else { path.add(new THREE.LineCurve3(a, c)); segs += 2; }
+// Трос фиксированной топологии: nPts опорных точек, ROPE_SUB делений на отрезок.
+// Геометрия создаётся один раз, вершины пересчитываются на месте — без выделения памяти в кадре.
+// sags[i] — провисание i-го отрезка (м, вниз по y). keep:false — статичный трос, его можно склеить с соседями.
+const ROPE_SUB = 6, ROPE_RAD = 5;
+const ROPE_COS = [], ROPE_SIN = [];
+for (let j = 0; j < ROPE_RAD; j++) { ROPE_COS.push(Math.cos(j / ROPE_RAD * Math.PI * 2)); ROPE_SIN.push(Math.sin(j / ROPE_RAD * Math.PI * 2)); }
+function rope(parent, mat, r = 0.0075, nPts = 2, { keep = true } = {}) {
+  const rings = (nPts - 1) * ROPE_SUB + 1;
+  const pos = new Float32Array(rings * ROPE_RAD * 3), nor = new Float32Array(rings * ROPE_RAD * 3), ctr = new Float32Array(rings * 3);
+  const idx = [];
+  for (let i = 0; i < rings - 1; i++) for (let j = 0; j < ROPE_RAD; j++) {
+    const a = i * ROPE_RAD + j, b = i * ROPE_RAD + (j + 1) % ROPE_RAD, c = a + ROPE_RAD, d = b + ROPE_RAD;
+    idx.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = false; mesh.frustumCulled = false; mesh.userData.keep = keep; parent.add(mesh);
+  const update = (points, sags = null) => {
+    let k = 0;
+    for (let s = 0; s < nPts - 1; s++) {
+      const a = points[s], c = points[s + 1], sag = sags ? (sags[s] || 0) : 0;
+      const n = s === nPts - 2 ? ROPE_SUB + 1 : ROPE_SUB;
+      for (let q = 0; q < n; q++) {
+        const t = q / ROPE_SUB;
+        ctr[k++] = a.x + (c.x - a.x) * t; ctr[k++] = a.y + (c.y - a.y) * t - 4 * sag * t * (1 - t); ctr[k++] = a.z + (c.z - a.z) * t;
+      }
     }
-    const g = new THREE.TubeGeometry(path, segs, r, 6, false);
-    mesh.geometry.dispose(); mesh.geometry = g;
+    for (let i = 0; i < rings; i++) {
+      const i0 = Math.max(0, i - 1) * 3, i1 = Math.min(rings - 1, i + 1) * 3, ic = i * 3;
+      let tx = ctr[i1] - ctr[i0], ty = ctr[i1 + 1] - ctr[i0 + 1], tz = ctr[i1 + 2] - ctr[i0 + 2];
+      let L = Math.hypot(tx, ty, tz); if (L < 1e-7) { tx = 0; ty = 1; tz = 0; L = 1; } tx /= L; ty /= L; tz /= L;
+      let ux = 0, uy = 1, uz = 0; if (Math.abs(ty) > 0.95) { ux = 1; uy = 0; }
+      let nx = ty * uz - tz * uy, ny = tz * ux - tx * uz, nz = tx * uy - ty * ux;
+      L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
+      const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+      for (let j = 0; j < ROPE_RAD; j++) {
+        const dx = nx * ROPE_COS[j] + bx * ROPE_SIN[j], dy = ny * ROPE_COS[j] + by * ROPE_SIN[j], dz = nz * ROPE_COS[j] + bz * ROPE_SIN[j];
+        const o = (i * ROPE_RAD + j) * 3;
+        pos[o] = ctr[ic] + dx * r; pos[o + 1] = ctr[ic + 1] + dy * r; pos[o + 2] = ctr[ic + 2] + dz * r;
+        nor[o] = dx; nor[o + 1] = dy; nor[o + 2] = dz;
+      }
+    }
+    geo.attributes.position.needsUpdate = true; geo.attributes.normal.needsUpdate = true;
   };
+  update.mesh = mesh;
+  return update;
+}
+// Склейка статичных деталей группы в один меш на материал: меньше вызовов отрисовки и проходов теней.
+// Не трогает меши с userData.keep и вложенные группы.
+function mergeStatic(parent) {
+  const groups = new Map();
+  for (const ch of [...parent.children]) {
+    if (!ch.isMesh || ch.userData.keep) continue;
+    ch.updateMatrix();
+    const g = ch.geometry.index ? ch.geometry.toNonIndexed() : ch.geometry.clone();
+    if (!g.attributes.normal) g.computeVertexNormals();
+    g.applyMatrix4(ch.matrix);
+    const key = ch.material.uuid + (ch.castShadow ? 's' : '') + (ch.receiveShadow ? 'r' : '');
+    if (!groups.has(key)) groups.set(key, { mat: ch.material, cast: ch.castShadow, recv: ch.receiveShadow, geos: [] });
+    groups.get(key).geos.push(g);
+    parent.remove(ch); ch.geometry.dispose();
+  }
+  for (const gr of groups.values()) {
+    let n = 0; for (const g of gr.geos) n += g.attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3); let o = 0;
+    for (const g of gr.geos) { pos.set(g.attributes.position.array, o * 3); nor.set(g.attributes.normal.array, o * 3); o += g.attributes.position.count; g.dispose(); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    const m = new THREE.Mesh(geo, gr.mat); m.castShadow = gr.cast; m.receiveShadow = gr.recv; m.userData.keep = true; parent.add(m);
+  }
 }
 function foilShape(chordTop, chordTip, depth, sweep, tipRound = 0.5) {
   // планформа пера в плоскости XY: вершина у оси поворота (0,0), перо вниз (−y), задняя кромка −x
@@ -376,11 +432,11 @@ export function createBoat() {
   const matRubber = new THREE.MeshStandardMaterial({ color: '#3a3f47', roughness: 0.7 });
 
   const hull = new THREE.Mesh(buildHullGeometry(), matHull);
-  hull.castShadow = true; hull.receiveShadow = true; heelG.add(hull);
+  hull.castShadow = true; hull.receiveShadow = true; hull.userData.keep = true; heelG.add(hull);
   const deck = new THREE.Mesh(buildDeckGeometry(), matDeck);
-  deck.castShadow = true; deck.receiveShadow = true; heelG.add(deck);
+  deck.castShadow = true; deck.receiveShadow = true; deck.userData.keep = true; heelG.add(deck);
   const brandTex = makeBrandDecalTexture();
-  heelG.add(makeHullDecal(1, brandTex)); heelG.add(makeHullDecal(-1, brandTex));
+  for (const sd of [1, -1]) { const dc = makeHullDecal(sd, brandTex); dc.userData.keep = true; heelG.add(dc); }
   const rail = new THREE.Mesh(new THREE.TubeGeometry(sheerCurve(), 300, 0.02, 10, true), matRubber);
   rail.castShadow = true; heelG.add(rail);
 
@@ -392,13 +448,13 @@ export function createBoat() {
   const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.05, 0.075), matDark);
   trunk.position.set(trunkX, deckAt(trunkX) + 0.035, 0); heelG.add(trunk);
   const board = foilMesh(foilShape(0.40, 0.26, 1.15, 0.03, 0.45), 0.022, matFoil);
-  board.position.set(trunkX + 0.2, trunkTop + 0.28, 0); heelG.add(board);
+  board.position.set(trunkX + 0.2, trunkTop + 0.28, 0); board.userData.keep = true; heelG.add(board);
   const boardTop = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.03), matFoil);
-  boardTop.position.set(trunkX, trunkTop + 0.29, 0); heelG.add(boardTop);
+  boardTop.position.set(trunkX, trunkTop + 0.29, 0); boardTop.userData.keep = true; heelG.add(boardTop);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.011, 8, 18), matRubber);
-  handle.position.set(trunkX, trunkTop + 0.34, 0); heelG.add(handle);
+  handle.position.set(trunkX, trunkTop + 0.34, 0); handle.userData.keep = true; heelG.add(handle);
   // амортизатор шверта (резинка к носу)
-  const bungee = rope(heelG, matDark, 0.005);
+  const bungee = rope(heelG, matDark, 0.005, 2, { keep: false });
   bungee([new THREE.Vector3(trunkX, trunkTop + 0.3, 0), new THREE.Vector3(1.75, deckAt(1.75) + 0.04, 0)]);
 
   // ----- кокпит -----
@@ -426,7 +482,7 @@ export function createBoat() {
     const fl = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.04), matAluDark);
     fl.position.set(-1.98, sternY + 0.05, s * 0.47); heelG.add(fl);
   }
-  const traveler = rope(heelG, matRope, 0.006);
+  const traveler = rope(heelG, matRope, 0.006, 3, { keep: false });
   const travP = new THREE.Vector3(-1.98, sternY + 0.045, 0);
   traveler([new THREE.Vector3(-1.98, sternY + 0.06, -0.47), travP, new THREE.Vector3(-1.98, sternY + 0.06, 0.47)]);
   const travBlock = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), matDark);
@@ -463,12 +519,12 @@ export function createBoat() {
   for (const p of [boomBlockEnd, boomBlockMid]) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), matDark); b.position.copy(p); rig.add(b); }
   // оттяжка гика (ванг) с талями
   const vangA = new THREE.Vector3(-0.02, 0.16, 0), vangB = new THREE.Vector3(-0.68, BOOM_H - 0.03, 0);
-  const vangRope = rope(rig, matDark, 0.012); vangRope([vangA, vangB]);
+  const vangRope = rope(rig, matDark, 0.012, 2, { keep: false }); vangRope([vangA, vangB]);
   const vangBlock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.04), matAluDark);
   vangBlock.position.copy(vangA).lerp(vangB, 0.5); vangBlock.quaternion.setFromUnitVectors(Y, vangB.clone().sub(vangA).normalize()); rig.add(vangBlock);
   // шкот-оттяжка (каннингем) и оттяжка шкотового угла
-  const cunn = rope(rig, matRopeRed, 0.005); cunn([new THREE.Vector3(-0.03, 0.15, 0.02), new THREE.Vector3(-0.055, BOOM_H + 0.28, 0.02)]);
-  const outhaul = rope(rig, matRopeBlue, 0.005); outhaul([new THREE.Vector3(-0.1, BOOM_H + 0.03, 0), new THREE.Vector3(-CLEW, BOOM_H + 0.03, 0)]);
+  const cunn = rope(rig, matRopeRed, 0.005, 2, { keep: false }); cunn([new THREE.Vector3(-0.03, 0.15, 0.02), new THREE.Vector3(-0.055, BOOM_H + 0.28, 0.02)]);
+  const outhaul = rope(rig, matRopeBlue, 0.005, 2, { keep: false }); outhaul([new THREE.Vector3(-0.1, BOOM_H + 0.03, 0), new THREE.Vector3(-CLEW, BOOM_H + 0.03, 0)]);
 
   // парус
   const NU = 22, NV = 32;
@@ -487,13 +543,15 @@ export function createBoat() {
   // лицевым граням — прямые глифы, обратным — отражённые
   const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTex, side: THREE.FrontSide, roughness: 0.92, shadowSide: THREE.DoubleSide }));
   const sailBack = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ map: sailTexBack, side: THREE.BackSide, roughness: 0.92 }));
-  sail.castShadow = true; sail.receiveShadow = true; rig.add(sail); rig.add(sailBack);
+  sail.castShadow = true; sail.receiveShadow = true; sail.userData.keep = true; sailBack.userData.keep = true; sail.frustumCulled = false; sailBack.frustumCulled = false; rig.add(sail); rig.add(sailBack);
   // ликтрос задней шкаторины
-  const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006);
+  const LEECH_N = NV / 4 + 1;
+  const leechRope = rope(rig, new THREE.MeshStandardMaterial({ color: '#cfd3d8', roughness: 0.9 }), 0.006, LEECH_N);
+  const leechPts = Array.from({ length: LEECH_N }, () => new THREE.Vector3());
   // колдунчики: пары ленточек у передней шкаторины на двух высотах (правый борт зелёный, левый красный)
   const ttG = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.9 }), ttR = new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.9 });
   const telltales = [];
-  for (const v of [0.3, 0.6]) for (const sgn of [1, -1]) telltales.push({ u: 0.22, v, sgn, draw: rope(rig, sgn > 0 ? ttG : ttR, 0.006), phase: Math.random() * 10 });
+  for (const v of [0.3, 0.6]) for (const sgn of [1, -1]) telltales.push({ u: 0.22, v, sgn, draw: rope(rig, sgn > 0 ? ttG : ttR, 0.006, 3), phase: Math.random() * 10, pts: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] });
 
 
   // флюгарка
@@ -507,7 +565,9 @@ export function createBoat() {
   windex.add(wArrow); rig.add(windex);
 
   // гика-шкот (обновляется каждый кадр)
-  const sheetRope = rope(heelG, matRope, 0.008);
+  const sheetRope = rope(heelG, matRope, 0.008, 6);
+  const sheetPts = Array.from({ length: 6 }, () => new THREE.Vector3());
+  const sheetSags = [0, 0, 0, 0, 0];
 
   // ----- руль -----
   const rudderPivot = new THREE.Group();
@@ -553,7 +613,12 @@ export function createBoat() {
   handA.scale.set(1, 0.7, 1.2); handB.scale.set(1, 0.7, 1.2);
   const footL = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe), footR = addM(new THREE.BoxGeometry(0.24, 0.08, 0.1), shoe);
   [thighL, thighR, shinL, shinR, upArmA, foreArmA, upArmB, foreArmB].forEach(o => sailor.add(o));
-  const handSheet = rope(heelG, matRope, 0.008);
+  const handSheet = rope(heelG, matRope, 0.008, 2);
+  const handPts = [new THREE.Vector3(), new THREE.Vector3()], handSag = [0];
+  // мелкие части фигуры не участвуют в проходе теней
+  for (const m of [neck, cap, visor, glasses, kneeL, kneeR, elbowA, elbowB, handA, handB, shoulderL, shoulderR, vestBand]) m.castShadow = false;
+  // статичные детали — в один меш на материал
+  mergeStatic(heelG); mergeStatic(rig); mergeStatic(rudderPivot);
 
   // ---------- обновление ----------
   let flutterPhase = 0;
@@ -600,22 +665,21 @@ export function createBoat() {
     }
     sailGeo.attributes.position.needsUpdate = true;
     sailGeo.computeVertexNormals();
-    const leech = [];
-    for (let j = 0; j <= NV; j += 4) { const k = (NU * (NV + 1) + j) * 3; leech.push(new THREE.Vector3(pa[k], pa[k + 1], pa[k + 2])); }
-    leechRope(leech);
+    for (let q = 0; q < LEECH_N; q++) { const k = (NU * (NV + 1) + q * 4) * 3; leechPts[q].set(pa[k], pa[k + 1], pa[k + 2]); }
+    leechRope(leechPts);
     // колдунчики: наветренный дёргается вверх при малом угле атаки, подветренный обвисает при срыве
     for (const t of telltales) {
       const i = Math.round(t.u * NU), j = Math.round(t.v * NV), k = (i * (NV + 1) + j) * 3;
-      const base = new THREE.Vector3(pa[k], pa[k + 1], pa[k + 2] + t.sgn * 0.025);
+      const base = t.pts[0].set(pa[k], pa[k + 1], pa[k + 2] + t.sgn * 0.025);
       const windward = t.sgn === side;              // ветер приходит со стороны side (+z = правый борт)
       const stream = windward ? (aoa >= 8 && !out.luffing ? 1 : 0) : (aoa <= 26 && !out.luffing ? 1 : 0);
       const wig = Math.sin(flutterPhase * 2.2 + t.phase);
-      const len = 0.28, dir = new THREE.Vector3(-1, 0, 0); // вдоль хорды назад
+      const len = 0.28; // вдоль хорды назад (−x)
       const lift = windward ? (1 - stream) * (0.6 + 0.4 * wig) : 0;          // наветренный поднимается
       const droop = !windward ? (1 - stream) * (0.5 + 0.3 * wig) : 0;       // подветренный обвисает
-      const p1 = base.clone().addScaledVector(dir, len * 0.5).add(new THREE.Vector3(0, len * 0.5 * (lift - droop) + 0.02 * wig * stream, t.sgn * 0.02 * stream * wig));
-      const p2 = base.clone().addScaledVector(dir, len * (0.3 + 0.7 * stream)).add(new THREE.Vector3(0, len * (lift * 0.9 - droop * 0.9) + 0.03 * wig * stream, t.sgn * 0.04 * stream * Math.sin(flutterPhase * 2.2 + t.phase + 1)));
-      t.draw([base, p1, p2]);
+      t.pts[1].set(base.x - len * 0.5, base.y + len * 0.5 * (lift - droop) + 0.02 * wig * stream, base.z + t.sgn * 0.02 * stream * wig);
+      t.pts[2].set(base.x - len * (0.3 + 0.7 * stream), base.y + len * (lift * 0.9 - droop * 0.9) + 0.03 * wig * stream, base.z + t.sgn * 0.04 * stream * Math.sin(flutterPhase * 2.2 + t.phase + 1));
+      t.draw(t.pts);
     }
   }
 
@@ -725,11 +789,11 @@ export function createBoat() {
     extension.scale.y = EXT_LEN / 1.1; extension.position.x = EXT_LEN / 2; extGrip.position.x = EXT_LEN - 0.1;
 
     // шкот от блока в переднюю руку
-    const handPt = P.handB.clone().add(new THREE.Vector3(0, -0.03, 0));
+    const handPt = handPts[1].copy(P.handB); handPt.y -= 0.03; handPts[0].copy(blockTop);
     const midY = (blockTop.y + handPt.y) / 2;
     const wantSag = run ? 0.02 : 0.03 + 0.1 * sheetState.ease + 0.12 * sheetState.slack;
     const sag = Math.min(wantSag, midY - (floorY + 0.05));
-    handSheet([blockTop, handPt], [Math.max(0, sag)]);
+    handSag[0] = Math.max(0, sag); handSheet(handPts, handSag);
   }
 
   function update(state, out, ctl, dt, t) {
@@ -747,28 +811,28 @@ export function createBoat() {
 
     // гика-шкот: блок на погоне → блок на ноке гика → обратно на погон (тали 2:1) → вдоль гика к среднему блоку → блок в кокпите
     const rot = rig.rotation.y;
-    const bEnd = boomBlockEnd.clone().applyAxisAngle(Y, rot).add(mastBase);
-    const bEnd2 = boomBlockEnd.clone().add(new THREE.Vector3(0.09, 0, 0)).applyAxisAngle(Y, rot).add(mastBase);
-    const bMid = boomBlockMid.clone().applyAxisAngle(Y, rot).add(mastBase);
-    const tv = travP.clone().add(new THREE.Vector3(0, 0.03, 0));
+    sheetPts[0].set(travP.x, travP.y + 0.03, travP.z + 0.02);
+    sheetPts[1].copy(boomBlockEnd).applyAxisAngle(Y, rot).add(mastBase);
+    sheetPts[2].set(travP.x, travP.y + 0.03, travP.z - 0.02);
+    sheetPts[3].copy(boomBlockEnd); sheetPts[3].x += 0.09; sheetPts[3].applyAxisAngle(Y, rot).add(mastBase);
+    sheetPts[4].copy(boomBlockMid).applyAxisAngle(Y, rot).add(mastBase);
+    sheetPts[5].copy(blockTop);
     // натяжение: гик упирается в ограничитель шкота и парус тянет → шкот натянут; иначе провисает
     const restrained = Math.abs(Math.abs(state.boom) - out.sheet) < 3 && !out.luffing;
     const load = restrained ? THREE.MathUtils.clamp(out.Fmag / 90, 0, 1) : 0;
     const slack = 1 - load;
     sheetState.slack += (slack - sheetState.slack) * Math.min(1, dt * 3);
     const sl = sheetState.slack;
-    sheetRope(
-      [tv.clone().add(new THREE.Vector3(0, 0, 0.02)), bEnd, tv.clone().add(new THREE.Vector3(0, 0, -0.02)), bEnd2, bMid, blockTop],
-      [0.01 + 0.14 * sl, 0.01 + 0.14 * sl, 0.02 + 0.16 * sl, 0.02 + 0.22 * sl, 0.0]
-    );
+    sheetSags[0] = sheetSags[1] = 0.01 + 0.14 * sl; sheetSags[2] = 0.02 + 0.16 * sl; sheetSags[3] = 0.02 + 0.22 * sl; sheetSags[4] = 0;
+    sheetRope(sheetPts, sheetSags);
 
     rudderPivot.rotation.y = state.rudder * DEG;
     board.position.y = trunkTop + 0.28 - 0.725 + 0.725 + (1 - state.board) * 0.6; boardTop.position.y = trunkTop + 0.29 + (1 - state.board) * 0.6; handle.position.y = trunkTop + 0.34 + (1 - state.board) * 0.6;
     sheetState.ease += (out.sheet / 90 - sheetState.ease) * Math.min(1, dt * 3);
-    sailor.visible = sailorEnabled && !out.capsized;
+    sailor.visible = sailorEnabled && !out.capsized; handSheet.mesh.visible = sailor.visible;
     if (sailor.visible) updateSailor(state, dt, out);
   }
 
   let sailorEnabled = true;
-  return { root, heelG, rig, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; if (!v) handSheet([blockTop, blockTop.clone().add(new THREE.Vector3(0, 0.001, 0))]); }, MAST_H, BOOM_H };
+  return { root, heelG, rig, update, setSailor: (v) => { sailorEnabled = v; sailor.visible = v; handSheet.mesh.visible = v; }, MAST_H, BOOM_H };
 }
