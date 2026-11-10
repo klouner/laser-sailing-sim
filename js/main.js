@@ -496,7 +496,7 @@ function boatStarboard() { const p = state.heading * DEG; return new THREE.Vecto
 const look = { yaw: 0, pitch: -0.1, drag: null };       // взгляд из кокпита относительно носа лодки
 const baseFov = () => { const a = canvas.clientWidth / Math.max(1, canvas.clientHeight); return camMode === 'cockpit' ? (a < 0.9 ? 92 : 74) : (a < 0.9 ? 68 : 50); };
 const CAM_ORDER = ['chase', 'top', 'side', 'cockpit', 'free'];
-const eye = new THREE.Vector3(), eyeTo = new THREE.Vector3(); let eyeInit = false;
+const eye = new THREE.Vector3(), eyeTo = new THREE.Vector3(), eyeLocal = new THREE.Vector3(); let eyeInit = false;
 function setCamera(mode) {
   const was = camMode;
   camMode = mode;
@@ -522,8 +522,12 @@ const camT = new THREE.Vector3(), camO = new THREE.Vector3(), camUp = new THREE.
 function updateCamera(dt) {
   if (camMode === 'cockpit') {
     // глаза матроса: положение головы сглаживается, горизонт остаётся ровным, а лодка кренится вокруг
+    // Положение головы сглаживается в системе самой лодки, а не в мире: камера жёстко едет вместе с корпусом.
+    // Если сглаживать в мире, камера отстаёт от лодки на переменную величину, и всё вблизи дрожит.
     boat.headWorld(eyeTo); eyeTo.y += 0.05;
-    if (!eyeInit) { eye.copy(eyeTo); eyeInit = true; } else eye.lerp(eyeTo, Math.min(1, dt * 10));
+    boat.heelG.updateWorldMatrix(true, false); boat.heelG.worldToLocal(eyeTo);
+    if (!eyeInit) { eyeLocal.copy(eyeTo); eyeInit = true; } else eyeLocal.lerp(eyeTo, 1 - Math.exp(-dt * 10));
+    boat.heelG.localToWorld(eye.copy(eyeLocal));
     const a = (90 - state.heading) * DEG + look.yaw, cp = Math.cos(look.pitch);
     camera.position.copy(eye);
     camT.set(eye.x + Math.cos(a) * cp, eye.y + Math.sin(look.pitch), eye.z - Math.sin(a) * cp);

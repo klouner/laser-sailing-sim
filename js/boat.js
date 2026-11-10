@@ -634,21 +634,32 @@ export function createBoat(env0 = null) {
   let mastBend = 0;
   const bendAt = (v) => mastBend * v * v;
   // angleAt(v) — куда смотрит хвост кармана на высоте v (0 у гика, 1 у топа)
-  function updateSleeve(angleAt) {
+  // tailAt(v, len, out) — точка паруса на расстоянии len от передней шкаторины на высоте v (0 у гика, 1 у топа).
+  // Хвост кармана кладётся прямо на эту точку: он лежит на парусе и не протыкает его, как бы тот ни выгнулся.
+  const slvT = { x: 0, z: 0 };
+  function updateSleeve(tailAt) {
+    let phi = 0;
     for (let i = 0; i <= SLV_H; i++) {
       const f = i / SLV_H, h = slvY0 + (slvY1 - slvY0) * f, r = 0.046 - 0.016 * f;
       const v = Math.min(1, Math.max(0, (h - (BOOM_H + 0.03)) / (MAST_H - 0.05 - BOOM_H - 0.03))), cx = -RAKE * h / MAST_H - bendAt(v);
-      const phi = angleAt(v), cs = Math.cos(phi), sn = Math.sin(phi);
+      let tail = SLV_TAIL * (1 - 0.35 * f);
+      if (tailAt) {
+        tailAt(v, tail, slvT);
+        const dx = slvT.x - cx, dz = slvT.z, d = Math.hypot(dx, dz);
+        // у топа парус сходится в точку: направление там берётся с кольца ниже, а хвост сходит на нет
+        if (d > r * 1.15) { phi = Math.atan2(dz, -dx); tail = d; } else tail = r * 1.15;
+      }
+      const cs = Math.cos(phi), sn = Math.sin(phi);
       for (let j = 0; j < SLV_P; j++) {
-        const lx = j < SLV_M ? slvShape[j][0] * r : -SLV_TAIL * (1 - 0.35 * f), lz = j < SLV_M ? slvShape[j][1] * r : 0;
+        const lx = j < SLV_M ? slvShape[j][0] * r : -tail, lz = j < SLV_M ? slvShape[j][1] * r : 0;
         const o = (i * SLV_P + j) * 3;
         slvPos[o] = cx + lx * cs + lz * sn; slvPos[o + 1] = h; slvPos[o + 2] = -lx * sn + lz * cs;
       }
     }
     slvGeo.attributes.position.needsUpdate = true; slvGeo.computeVertexNormals();
   }
-  updateSleeve(() => 0);
-  const mastTopCap = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.1, 12), matDark);
+  updateSleeve(null);
+  const mastTopCap = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.036, 0.1, 12), matDark);   // чуть шире кармана: закрывает его верхний срез
   mastTopCap.position.copy(mastAt(MAST_H)); mastTopCap.rotation.z = mastTilt; mastTopCap.userData.keep = true; rig.add(mastTopCap);
 
   // гик
@@ -819,7 +830,21 @@ export function createBoat(env0 = null) {
     for (let q = 0; q < LEECH_N; q++) { const k = (NU * (NV + 1) + q * 4) * 3; leechPts[q].set(pa[k], pa[k + 1], pa[k + 2]); }
     leechRope(leechPts);
     // хвост кармана мачты смотрит туда, куда уходит парус у передней шкаторины
-    updateSleeve((v) => { const j = Math.round(v * NV), k0 = j * 3, k2 = (2 * (NV + 1) + j) * 3; return Math.atan2(pa[k2 + 2] - pa[k0 + 2], -(pa[k2] - pa[k0])); });
+    updateSleeve((v, len, o) => {
+      // идём вдоль паруса от мачты на длину len; между двумя соседними рядами по высоте результат смешивается
+      const jf = v * NV, j0 = Math.min(NV - 1, Math.floor(jf)), t = jf - j0;
+      o.x = 0; o.z = 0;
+      for (let q = 0; q < 2; q++) {
+        const j = j0 + q;
+        let px = pa[j * 3], pz = pa[j * 3 + 2], left = Math.min(len, 0.5 * sailFlat[j * 3 + 2]), rx = px, rz = pz;
+        for (let i = 1; i <= NU && left > 0; i++) {
+          const k = (i * (NV + 1) + j) * 3, dx = pa[k] - px, dz = pa[k + 2] - pz, d = Math.hypot(dx, dz);
+          if (d >= left || i === NU) { const g = d > 1e-6 ? Math.min(1, left / d) : 0; rx = px + dx * g; rz = pz + dz * g; left = 0; }
+          else { left -= d; px = pa[k]; pz = pa[k + 2]; rx = px; rz = pz; }
+        }
+        const w = q ? t : 1 - t; o.x += rx * w; o.z += rz * w;
+      }
+    });
     // колдунчики: наветренный дёргается вверх при малом угле атаки, подветренный обвисает при срыве
     for (const t of telltales) {
       const i = Math.round(t.u * NU), j = Math.round(t.v * NV), k = (i * (NV + 1) + j) * 3;
