@@ -371,6 +371,7 @@ function startLesson(i) {
   resetForTraining();
   mode = 'lesson';
   lessons.start(i, state, ctl);
+  stats.track('lesson', { id: lessons.run.lesson.id, result: 'start' });
   const L = lessons.run.lesson;
   course.showCourse(!!L.usesCourse);
   ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
@@ -382,6 +383,7 @@ function startRace() {
   lessons.stop(ctl);
   resetForTraining();
   mode = 'race';
+  stats.track('race', { result: 'start' });
   course.start(state, ctl);
   ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
   tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
@@ -472,7 +474,7 @@ function updateTraining(out, dt, t) {
       tb.note.textContent = rec ? 'Финиш! Это результат уровня топ-10.' : `Финиш! До топ-10 не хватило ${fmtTime(r.result - top[top.length - 1].time)}.`;
       tb.next.hidden = false; tb.next.textContent = 'Ещё раз';
       toast('ФИНИШ ' + fmtTime(r.result), true, 2500);
-      stats.track('race', { time: Math.round(r.result * 10) / 10 });
+      stats.track('race', { result: 'finish', time: Math.round(r.result * 10) / 10 });
       if (rec) setTimeout(() => askName(r.result), 1500);
     }
   } else if (mode === 'lesson') {
@@ -791,5 +793,6 @@ function frame() {
 }
 
 showQuality(); showFps();
+{ const v = new URL(import.meta.url).searchParams.get('v'); if (v) $('ver').textContent = 'Версия ' + v + '.'; }
 frame();
 requestAnimationFrame(() => $('loading').classList.add('hide'));

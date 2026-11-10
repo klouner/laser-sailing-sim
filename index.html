@@ -10,12 +10,24 @@
 <meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=56">
+<link rel="stylesheet" href="style.css?v=57">
+<!-- Номер версии стоит у каждого модуля: после обновления сайта браузер не смешает новые файлы со старыми из кэша -->
 <script type="importmap">
 {
   "imports": {
     "three": "./vendor/three.module.min.js",
-    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",
+    "./js/analytics.js": "./js/analytics.js?v=57",
+    "./js/audio.js": "./js/audio.js?v=57",
+    "./js/boat.js": "./js/boat.js?v=57",
+    "./js/config.js": "./js/config.js?v=57",
+    "./js/course.js": "./js/course.js?v=57",
+    "./js/env.js": "./js/env.js?v=57",
+    "./js/hud.js": "./js/hud.js?v=57",
+    "./js/leaderboard.js": "./js/leaderboard.js?v=57",
+    "./js/lessons.js": "./js/lessons.js?v=57",
+    "./js/physics.js": "./js/physics.js?v=57",
+    "./js/scene.js": "./js/scene.js?v=57"
   }
 }
 </script>
@@ -194,7 +206,7 @@
       </details>
     </section>
     <footer class="foot">Мышь/палец: вращать камеру · колесо: зум · Space — пауза · R — сброс · C — камера<br>Тренажёр для учеников парусной школы <a href="https://silavetra.com" target="_blank" rel="noopener">«Сила ветра»</a></footer>
-    <p class="privacy">Сайт собирает техническую статистику посещений: IP-адрес, устройство, время на сайте и пройденные уроки.</p>
+    <p class="privacy">Сайт собирает техническую статистику посещений: IP-адрес, устройство, время на сайте и пройденные уроки. <span id="ver"></span></p>
   </aside>
 
   <div id="hud">
@@ -251,6 +263,6 @@
 
   <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
 </div>
-<script type="module" src="js/main.js?v=56"></script>
+<script type="module" src="js/main.js?v=57"></script>
 </body>
 </html>

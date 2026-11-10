@@ -83,5 +83,16 @@ export function initAnalytics({ gl = null, state = null } = {}) {
   window.addEventListener('pagehide', () => { if (active - lastSent > 2) track('close', now()); });
   setInterval(() => { tick(); if (visible && active - lastSent >= PING_SEC - 1) track('ping', now()); }, 5000);
   deviceInfo(gl).then((d) => track('open', d), () => track('open', {}));
+  // Самопроверка: адрес с ?debug=1 шлёт пробное событие обычным запросом и показывает на экране, что ответил сервер
+  if (/[?&]debug=1/.test(location.search)) {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99;background:#000;border:1px solid #fff;color:#fff;padding:14px 18px;font:500 14px/1.5 Inter,Arial,sans-serif;max-width:86vw;text-align:center';
+    box.textContent = 'Статистика: проверяю связь с сервером…'; document.body.appendChild(box);
+    box.addEventListener('click', () => box.remove());
+    const body = JSON.stringify({ v: 1, vid: VID, sid: SID, type: 'debug', t: 0, seq: seq++ });
+    fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain;charset=UTF-8' } })
+      .then((r) => { box.textContent = `Статистика: сервер ответил ${r.status}${r.status === 204 ? ', всё работает' : ''}. Посетитель ${VID.slice(0, 8)}. Нажмите, чтобы закрыть.`; })
+      .catch((e) => { box.textContent = `Статистика: запрос до сервера не дошёл (${e.message}). Скорее всего, его режет блокировщик или сеть. Нажмите, чтобы закрыть.`; });
+  }
   return { track };
 }
