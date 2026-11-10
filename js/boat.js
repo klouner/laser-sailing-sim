@@ -796,7 +796,10 @@ export function createBoat(env0 = null) {
           z += side * bubble * Math.min(1, out.AWS / 3);
         }
         const k = (i * (NV + 1) + j) * 3;
-        pa[k] = x - bendAt(v) * (1 - u) * (1 - u); pa[k + 1] = y; pa[k + 2] = z;
+        // изгиб мачты уносит назад переднюю шкаторину; чем дальше точка от мачты по хорде, тем меньше её сдвигает.
+        // Считать надо в метрах, а не в долях хорды: у топа хорда сходит на нет, и весь парус там идёт вместе с мачтой.
+        const wB = Math.max(0, 1 - u * chord / 2.7);
+        pa[k] = x - bendAt(v) * wB * wB; pa[k + 1] = y; pa[k + 2] = z;
       }
     }
     sailGeo.attributes.position.needsUpdate = true;
@@ -848,7 +851,9 @@ export function createBoat(env0 = null) {
     const seat = Math.max(edge, 0.46 + 0.22 * hike);
     const ttheta = ay <= 0.45 ? -0.30 + 0.68 * (ay / 0.45) : 0.38 + 1.07 * hike;
     // борт: наветренный, пока физика не посадила матроса явно на другой; смена борта с короткой задержкой, без дёрганья
-    const wantSide = ay > 0.1 ? Math.sign(state.crewY) : (state.side || 1);
+    // с запасом в обе стороны: около нуля матрос не мечется между бортами
+    let wantSide = SS.sgn || state.side || 1;
+    if (ay > 0.18) wantSide = Math.sign(state.crewY); else if (ay < 0.06) wantSide = state.side || wantSide;
     if (!SS.sgn) SS.sgn = wantSide;
     if (wantSide !== SS.sgn) { SS.flip += dt; if (SS.flip > 0.3) { SS.sgn = wantSide; SS.flip = 0; } } else SS.flip = 0;
     SS.x += (tx - SS.x) * k; SS.theta += (ttheta - SS.theta) * Math.min(1, dt * 8);

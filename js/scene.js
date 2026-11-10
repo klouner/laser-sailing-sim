@@ -178,7 +178,7 @@ export function makeWater(env) {
         #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         transformed.y += whg.x; vWave = whg.x / uAmpTotal; vGust = gustV(wp0.xz); vWXZ = wp0.xz;
-        vRefl = uReflectM * vec4(wp0.x, 0.0, wp0.z, 1.0);`);
+        vRefl = uReflectM * vec4(wp0.x, uBoatPlane.x, wp0.z, 1.0);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uGustOn, uWhitecap, uBoatWash, uReflectOn; uniform vec2 uPivot, uBoatFwd; uniform vec3 uDeep, uScatter; uniform sampler2D tReflect; uniform vec2 uRipple;
@@ -239,8 +239,10 @@ export function makeWater(env) {
           // отражение лодки: картинка из зеркальной камеры, смещённая рябью
           // чем сильнее волнение, тем сильнее отражение рвётся рябью и тем оно слабее
           float chop = smoothstep(0.02, 0.16, uAmpTotalF);
-          vec2 ruv = vRefl.xy / vRefl.w, rd = normal.xy * (0.05 + 0.10 * chop);
-          vec4 rc = 0.5 * (texture2D(tReflect, ruv + rd) + texture2D(tReflect, ruv + rd * vec2(-0.6, 1.7) + vec2(0.0, 0.004)));
+          // сдвигает отражение только рябь: отклонение нормали от ровной воды. Сама нормаль в пространстве вида
+          // почти вся смотрит вверх, и сдвиг по ней отрывал отражение от корпуса и раздваивал его.
+          vec2 ruv = vRefl.xy / vRefl.w, rd = (normal.xy - nonPerturbedNormal.xy) * (0.10 + 0.22 * chop);
+          vec4 rc = 0.5 * (texture2D(tReflect, ruv + rd) + texture2D(tReflect, ruv - rd * 0.5));
           outgoingLight = mix(outgoingLight, rc.rgb, rc.a * (0.20 + 0.55 * fresW) * (1.0 - 0.7 * chop) * (1.0 - foamE) * (1.0 - 0.5 * gP));
         }
         #include <opaque_fragment>`)
