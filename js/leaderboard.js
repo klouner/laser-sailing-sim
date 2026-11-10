@@ -1,7 +1,7 @@
 // Таблица лидеров: localStorage по умолчанию; общий вариант — свой сервер (server/) либо публичный JSON-блоб (jsonblob.com)
 import { LEADERBOARD_URL, GFORM } from './config.js';
 
-const KEY = 'laser3d.leaderboard.v2', NAME_KEY = 'laser3d.name';
+const KEY = 'laser3d.leaderboard.v3', NAME_KEY = 'laser3d.name';
 const sortTrim = (list, n = 10) => (Array.isArray(list) ? list : []).filter(e => e && typeof e.time === 'number' && e.time > 20 && e.time < 3600).sort((a, b) => a.time - b.time).slice(0, n);
 const isBlob = /jsonblob\.com\/api\/jsonBlob\//.test(LEADERBOARD_URL);
 export const isShared = !!LEADERBOARD_URL || !!GFORM;
@@ -22,8 +22,8 @@ function parseCSV(text) {
 }
 // Формат строки рекорда: в текстовой колонке «Имя» — «Имя | 151.2 §2».
 // Время дублируется в имени, потому что Google определяет колонку «Время» как числовую и отбрасывает текстовые значения.
-// §2 — версия физики: после изменения модели лодки старые результаты несравнимы и в таблицу не попадают.
-const TAG = '§2';
+// §N — версия физики: после изменения модели лодки старые результаты несравнимы и в таблицу не попадают.
+const TAG = '§3';
 async function gformGet() {
   const q = encodeURIComponent(`select A,B where B ends with '${TAG}'`);
   const r = await fetch(GFORM.csv + (GFORM.csv.includes('?') ? '&' : '?') + 'tq=' + q + '&_=' + Date.now(), { cache: 'no-store' });

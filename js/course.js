@@ -1,6 +1,7 @@
 // Трасса: наветренный буй и финишные ворота из двух буёв. Гонка на время.
 import * as THREE from 'three';
 import { floatOnWaves } from './env.js';
+import { settleRig } from './physics.js';
 
 export const COURSE = {
   windward: { x: 0, z: -110, name: 'наветренный буй' },
@@ -74,6 +75,7 @@ export function createCourse(scene, env) {
     race.prevZ = state.z;
     ctl.windFrom = COURSE.windFrom; ctl.windSpeed = COURSE.windSpeed; ctl.sheet = 20;
     ctl.autoSheet = false; ctl.lockHeading = false; ctl.paused = false; ctl.rudder = 0;
+    settleRig(state, ctl);
     setHighlight('W');
   }
   function stop() { race.active = false; race.phase = 'idle'; group.visible = false; }

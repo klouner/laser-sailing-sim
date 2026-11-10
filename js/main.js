@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createBoat, HULL } from './boat.js';
 import { makeSky, makeClouds, makeWater, makeCompassRing, VectorArrow, makeWindStreaks, makeWake, setLabelScale } from './scene.js';
-import { createState, defaultControls, step, norm180, norm360, compassName, optimalSheet, KN, PHYS_DT } from './physics.js';
+import { createState, defaultControls, step, settleRig, norm180, norm360, compassName, optimalSheet, KN, PHYS_DT, BOAT } from './physics.js';
 import { createMinimap } from './hud.js';
 import { createCourse, fmtTime } from './course.js';
 import { createEnvironment } from './env.js';
@@ -91,6 +91,7 @@ const lessons = createLessonRunner();
 // ---------- состояние ----------
 const state = createState();
 const ctl = defaultControls();
+settleRig(state, ctl);
 ctl.heading = state.heading;
 const show = { trueWind: true, appWind: true, vel: true, force: true, noGo: true, streaks: true, labels: !isTouch, sailor: true };
 $('showLabels').checked = show.labels;
@@ -107,14 +108,14 @@ const ui = {
 };
 const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
 function setRudder(v) { ctl.rudder = THREE.MathUtils.clamp(v, -35, 35); ui.rudder.value = Math.round(ctl.rudder); autopilot = null; holdTarget = null; }
-function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, 0, 90); ui.sheet.value = Math.round(ctl.sheet); ctl.autoSheet = false; ui.autoSheet.checked = false; $('t-auto').classList.remove('active'); }
+function setSheet(v) { ctl.sheet = THREE.MathUtils.clamp(v, BOAT.boomMin, 90); ui.sheet.value = Math.round(ctl.sheet); ctl.autoSheet = false; ui.autoSheet.checked = false; $('t-auto').classList.remove('active'); }
 function setWindFrom(v) { ctl.windFrom = ((v % 360) + 360) % 360; ui.windFrom.value = Math.round(ctl.windFrom); }
 function setAutoSheet(v) { if (v && (raceLocked() || lessons.run.status === 'running')) { toast('Автошкот недоступен в уроках и гонке'); v = false; } ctl.autoSheet = v; ui.autoSheet.checked = v; $('t-auto').classList.toggle('active', v); }
 
 const raceLocked = () => course.race.active && course.race.phase !== 'finished';
 ui.windFrom.addEventListener('input', () => { if (raceLocked()) { ui.windFrom.value = ctl.windFrom; return; } ctl.windFrom = +ui.windFrom.value; if (devCompass.on) setCompass(false); });
 ui.windSpeed.addEventListener('input', () => { if (raceLocked()) { ui.windSpeed.value = ctl.windSpeed; return; } ctl.windSpeed = +ui.windSpeed.value; });
-ui.heading.addEventListener('input', () => { if (raceLocked() || lessons.run.status === 'running') { ui.heading.value = Math.round(state.heading); return; } state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; holdTarget = null; });
+ui.heading.addEventListener('input', () => { if (raceLocked() || lessons.run.status === 'running') { ui.heading.value = Math.round(state.heading); return; } state.heading = +ui.heading.value; state.yawRate = 0; autopilot = null; holdTarget = null; if (state.capsized) settleRig(state, ctl); });
 ui.sheet.addEventListener('input', () => { setSheet(+ui.sheet.value); });
 ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autopilot = null; holdTarget = null; });
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
@@ -212,7 +213,7 @@ function bindPad(el, thumb, horizontal, onValue, onRelease, holds = false) {
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
 bindPad($('t-rudder'), $('t-rudder-thumb'), true, (k) => setRudder(k * 35), null, true);
-bindPad($('t-sheet'), $('t-sheet-thumb'), false, (k) => setSheet(k * 90));
+bindPad($('t-sheet'), $('t-sheet-thumb'), false, (k) => setSheet(BOAT.boomMin + k * (90 - BOAT.boomMin)));
 $('t-pause').addEventListener('click', togglePause);
 $('t-cam').addEventListener('click', () => { const order = ['chase', 'top', 'side', 'free']; setCamera(order[(order.indexOf(camMode) + 1) % 4]); });
 $('t-tack').addEventListener('click', () => $('btn-tack').click());
@@ -233,7 +234,7 @@ function updateTouch() {
   const left = (50 + ctl.rudder / 35 * 50 * (1 - padGeom.tw / Math.max(padGeom.tw, padGeom.trackW))).toFixed(2) + '%';
   if (left !== padGeom.left) { padGeom.left = left; thumbR.style.left = left; }
   const usable = Math.max(1, padGeom.trackH - padGeom.tsz);
-  const top = (padGeom.tsz / 2 + ctl.sheetShown / 90 * usable).toFixed(1) + 'px';
+  const top = (padGeom.tsz / 2 + Math.max(0, ctl.sheetShown - BOAT.boomMin) / (90 - BOAT.boomMin) * usable).toFixed(1) + 'px';
   if (top !== padGeom.top) { padGeom.top = top; thumbS.style.top = top; }
 }
 
@@ -248,7 +249,7 @@ function reset() {
   const s = createState();
   Object.assign(state, s); holdTarget = null;
   state.heading = 90; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null;
-  ctl.sheet = 45; ui.sheet.value = 45;
+  ctl.sheet = 45; ui.sheet.value = 45; settleRig(state, ctl);
   if (camMode !== 'free') setCamera(camMode);
 }
 
@@ -273,7 +274,7 @@ function handleKeys(dt) {
       if (holdTarget === null) holdTarget = state.heading + state.yawRate * 0.35;
       const err = norm180(holdTarget - state.heading);
       if (Math.abs(err) > 50) holdTarget = state.heading;
-      const want = THREE.MathUtils.clamp(err * 1.3 - state.yawRate * 0.35, -18, 18);
+      const want = THREE.MathUtils.clamp(err * 1.3 - state.yawRate * 0.4, -25, 25);
       ctl.rudder += (want - ctl.rudder) * Math.min(1, dt * 8);
     } else {
       const k = Math.min(1, dt * 5); ctl.rudder += (0 - ctl.rudder) * k; if (Math.abs(ctl.rudder) < 0.3) ctl.rudder = 0;
@@ -281,7 +282,7 @@ function handleKeys(dt) {
     ui.rudder.value = Math.round(ctl.rudder);
   }
   if (left || right || padActive || autopilot || document.activeElement === ui.rudder || ctl.lockHeading || state.capsized) holdTarget = null;
-  if (inS || outS) { ctl.autoSheet = false; ui.autoSheet.checked = false; ctl.sheet = THREE.MathUtils.clamp(ctl.sheet + (outS ? 1 : -1) * 40 * dt, 0, 90); ui.sheet.value = Math.round(ctl.sheet); }
+  if (inS || outS) { ctl.autoSheet = false; ui.autoSheet.checked = false; ctl.sheet = THREE.MathUtils.clamp(ctl.sheet + (outS ? 1 : -1) * 40 * dt, BOAT.boomMin, 90); ui.sheet.value = Math.round(ctl.sheet); }
 }
 
 // ---------- тренировка: уроки, гонка, рекорды ----------
@@ -355,7 +356,7 @@ $('btn-course').addEventListener('click', () => {
   // свободная тренировка на трассе: буи видны, лодка на старте, ветер с севера, без таймера
   lessons.stop(ctl); course.stop(); mode = 'free'; tb.bar.hidden = true;
   const s = createState(); Object.assign(state, s);
-  state.x = 0; state.z = 12; state.heading = 45; state.vf = 1.5; holdTarget = null;
+  state.x = 0; state.z = 12; state.heading = 45; state.vf = 1.5; holdTarget = null; settleRig(state, ctl);
   ctl.windFrom = 0; ui.windFrom.value = 0; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
   if (ctl.paused) togglePause();
   course.showCourse(true); renderLessonList();
@@ -591,7 +592,7 @@ function simulate(dt) {
   // автопилот (оверштаг / фордевинд)
   if (autopilot) {
     const err = norm180(autopilot.target - state.heading);
-    ctl.rudder = THREE.MathUtils.clamp(err * 1.4 - state.yawRate * 0.3, -20, 20);
+    ctl.rudder = THREE.MathUtils.clamp(err * 1.4 - state.yawRate * 0.4, -30, 30);
     ui.rudder.value = Math.round(ctl.rudder);
     if (Math.abs(err) < 2.5 && Math.abs(state.yawRate) < 6) { autopilot = null; ctl.rudder = 0; ui.rudder.value = 0; }
   }
@@ -604,7 +605,7 @@ function simulate(dt) {
   if (!out || out.AWS === undefined) out = step(state, ctl, 0, env);
   if (state.lastGybe.time !== lastGybeSeen) {
     lastGybeSeen = state.lastGybe.time;
-    if (state.lastGybe.kick > 14) toast(state.lastGybe.kick > 28 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
+    if (state.lastGybe.kick > 1.6) toast(state.lastGybe.kick > 2.8 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
   }
   updateTraining(out, dt, t);
 

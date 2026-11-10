@@ -71,7 +71,7 @@ function buildHullGeometry() {
 }
 
 // Кокпит
-const COCKPIT = { xFront: 0.50, xBack: -1.05, wFront: 0.98, wBack: 0.80, depth: 0.20, r: 0.22 };
+const COCKPIT = { xFront: 0.14, xBack: -1.16, wFront: 0.98, wBack: 0.80, depth: 0.20, r: 0.22 };
 function cockpitHalfWidth(x) {
   const t = (COCKPIT.xFront - x) / (COCKPIT.xFront - COCKPIT.xBack);
   return (COCKPIT.wFront + (COCKPIT.wBack - COCKPIT.wFront) * t) / 2;
@@ -445,7 +445,7 @@ export function createBoat() {
   const floorY = deckAt(-0.2) - COCKPIT.depth + 0.01;
 
   // ----- шверт и колодец -----
-  const trunkX = 0.80, trunkTop = deckAt(trunkX) + 0.06;
+  const trunkX = 0.45, trunkTop = deckAt(trunkX) + 0.06;
   const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.05, 0.075), matDark);
   trunk.position.set(trunkX, deckAt(trunkX) + 0.035, 0); heelG.add(trunk);
   const board = foilMesh(foilShape(0.40, 0.26, 1.15, 0.03, 0.45), 0.022, matFoil);
@@ -460,19 +460,19 @@ export function createBoat() {
 
   // ----- кокпит -----
   const strapMat = new THREE.MeshStandardMaterial({ color: '#2f3640', roughness: 0.95 });
-  const strap = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.012, 0.09), strapMat);
-  strap.position.set(-0.28, floorY + 0.075, 0); heelG.add(strap);
-  for (const x of [0.25, -0.82]) { const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.1), matAlu); eye.position.set(x, floorY + 0.01, 0); heelG.add(eye); }
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.012, 0.09), strapMat);
+  strap.position.set(-0.52, floorY + 0.075, 0); heelG.add(strap);
+  for (const x of [-0.02, -1.02]) { const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.1), matAlu); eye.position.set(x, floorY + 0.01, 0); heelG.add(eye); }
   // блок гика-шкота со стопором
   const block = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.07, 18), matDark);
-  block.position.set(0.0, floorY + 0.06, 0); heelG.add(block);
+  block.position.set(-0.12, floorY + 0.06, 0); heelG.add(block);
   const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.05), matAluDark);
-  cleat.position.set(0.0, floorY + 0.12, 0); heelG.add(cleat);
-  const blockTop = new THREE.Vector3(0.0, floorY + 0.15, 0);
+  cleat.position.set(-0.12, floorY + 0.12, 0); heelG.add(cleat);
+  const blockTop = new THREE.Vector3(-0.12, floorY + 0.15, 0);
   // утки и ручки шкотов на палубе у кокпита
   for (const s of [-1, 1]) {
     const cl = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.03), matAluDark);
-    cl.position.set(0.72, deckAt(0.72) + 0.045, s * 0.26); heelG.add(cl);
+    cl.position.set(0.45, deckAt(0.45) + 0.045, s * 0.26); heelG.add(cl);
   }
   // нос: скоба и буксирный конец
   const bowEye = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.007, 8, 16), matAlu);
@@ -671,7 +671,7 @@ export function createBoat() {
   };
 
   function updateSail(out, dt, state) {
-    const side = out.side, aoa = out.aoa;
+    const side = state.sailSide, aoa = out.aoa;
     // полное заполаскивание (шкот перетравлен) — полощет весь парус, сильнее у задней шкаторины;
     // малый угол атаки — «пузырь» у передней шкаторины (парус заполаскивает спереди)
     const full = out.luffing ? 1 : 0;
@@ -731,40 +731,29 @@ export function createBoat() {
   //  • галфвинд/бакштаг — сидит на наветренном борту, при глиссировании смещается в корму
   //  • фордевинд — сидит у центра, корпус прямо, держит шкот у гика для быстрой реакции
   //  • оверштаг/фордевинд — переходит через лодку пригнувшись под гиком, меняя руки
-  const SS = { side: 1, x: -0.35, z: 0.45, theta: 0.4, crouch: 0 };
+  const SS = { y: -0.5, x: -0.35, theta: 0.4, crouch: 0 };
   // временные векторы кадра: берутся из пула, память в кадре не выделяется
   const pool = []; let poolI = 0;
   const tv = () => pool[poolI++] || (pool[poolI - 1] = new THREE.Vector3());
   const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _xAxis = new THREE.Vector3(1, 0, 0);
   const THIGH = 0.44, SHIN = 0.43, ARM1 = 0.30, ARM2 = 0.28, EXT_LEN = 1.05;
   function updateSailor(state, dt, out) {
-    const side = state.side;
+    // Матрос сидит там, где его держит физика: state.crewY — положение его центра тяжести поперёк лодки.
     const k = Math.min(1, dt * 3);
-    SS.side += (side - SS.side) * Math.min(1, dt * 2.4);
-    const cross = 1 - Math.min(1, Math.abs(SS.side));            // 1 — в середине перехода
-    const twa = out ? out.twaAbs : 90, hike = state.hike, spd = state.vf;
-    const light = Math.max(0, 1 - Math.abs(out ? out.Fs : 100) / 60); // штилевой режим
+    const twa = out ? out.twaAbs : 90, spd = state.vf;
+    const ay = Math.abs(state.crewY), hike = Math.min(1, Math.max(0, (ay - 0.45) / 0.6));
     const planing = Math.min(1, Math.max(0, (spd - 2.4) / 1.5));
-    let tx, tz, ttheta;
-    if (twa < 95) {            // против ветра и галфвинд
-      tx = -0.15 - 0.25 * hike;
-      tz = 0.46 + 0.22 * hike - 0.55 * light;                      // в штиль — к центру и даже под ветер
-      ttheta = 0.35 + 1.1 * hike - 0.25 * light;
-    } else if (twa < 150) {    // бакштаг
-      tx = -0.35 - 0.45 * planing;
-      tz = 0.42 + 0.2 * hike;
-      ttheta = 0.3 + 0.9 * hike;
-    } else {                   // фордевинд
-      tx = -0.25 - 0.3 * planing;
-      tz = 0.22;
-      ttheta = 0.12;
-    }
-    SS.x += (tx - SS.x) * k; SS.z += (tz - SS.z) * k; SS.theta += (ttheta - SS.theta) * k;
-    SS.crouch += (cross - SS.crouch) * Math.min(1, dt * 6);
-    const h = Math.min(1, Math.max(0, (SS.theta - 0.35) / 1.1));  // степень откренивания 0..1
+    const tx = twa < 95 ? -0.2 - 0.25 * hike : twa < 150 ? -0.4 - 0.4 * planing : -0.3 - 0.3 * planing;   // на попутных и в глиссировании — в корму
+    // таз: до 0.45 м матрос сидит внутри лодки, дальше — на борту и вывешивается корпусом
+    const seat = ay <= 0.45 ? ay : 0.46 + 0.22 * hike;
+    const ttheta = ay <= 0.45 ? 0.08 + 0.3 * (ay / 0.45) : 0.38 + 1.07 * hike;
+    SS.x += (tx - SS.x) * k; SS.theta += (ttheta - SS.theta) * Math.min(1, dt * 8);
+    SS.y += (Math.sign(state.crewY) * seat - SS.y) * Math.min(1, dt * 14);
+    const sv = THREE.MathUtils.clamp(SS.y / 0.3, -1, 1);          // куда наклонён корпус; у диаметральной плоскости — прямо
+    SS.crouch += ((1 - Math.abs(sv)) - SS.crouch) * Math.min(1, dt * 8);
+    const h = Math.min(1, Math.max(0, (SS.theta - 0.38) / 1.07)); // степень откренивания 0..1
     const dy = deckAt(SS.x);
-    const sv = SS.side;                                           // плавная сторона −1..1 (0 — в середине перехода)
-    const lateral = sv * SS.z;
+    const lateral = SS.y;
     const crouch = SS.crouch;
     // таз: на борту, при переходе — низко над кокпитом
     P.hip.set(SS.x, dy + 0.07 - 0.13 * crouch, lateral);
@@ -866,8 +855,7 @@ export function createBoat() {
     sheetPts[4].copy(boomBlockMid).applyAxisAngle(Y, rot).add(mastBase);
     sheetPts[5].copy(blockTop);
     // натяжение: гик упирается в ограничитель шкота и парус тянет → шкот натянут; иначе провисает
-    const restrained = Math.abs(Math.abs(state.boom) - out.sheet) < 3 && !out.luffing;
-    const load = restrained ? THREE.MathUtils.clamp(out.Fmag / 90, 0, 1) : 0;
+    const load = state.taut * THREE.MathUtils.clamp(out.Fmag / 90, 0, 1);
     const slack = 1 - load;
     sheetState.slack += (slack - sheetState.slack) * Math.min(1, dt * 3);
     const sl = sheetState.slack;

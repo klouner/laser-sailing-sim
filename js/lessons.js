@@ -1,15 +1,15 @@
 // Уроки: постановка ситуации + проверка цели
-import { KN } from './physics.js';
+import { KN, settleRig } from './physics.js';
 
 export const LESSONS = [
   {
     id: 'irons', title: 'Выход из левентика',
-    goal: 'Лодка почти носом в ветер и теряет ход. Переложи руль, увались от ветра до 45° и разгонись до 2 узлов, пока ход не пропал.',
-    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.heading = 8; state.vf = 0.9; state.vs = 0; ctl.sheet = 25; },
+    goal: 'Лодка стоит носом в ветер. Потрави шкот и дождись заднего хода. На заднем ходу руль работает наоборот: переложи его и держи, пока нос не уйдёт от ветра на 45°. Потом подбери шкот и разгонись до 2 узлов.',
+    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.heading = 4; state.vf = 0; state.vs = 0; ctl.sheet = 30; },
     check(out, state, el) {
-      if (state.vf < 0.15 && el > 1.5) return { fail: 'Ход пропал — лодка встала в левентик. В жизни тут пришлось бы «отрабатывать» парусом назад. Попробуй ещё раз, действуй рулём сразу.' };
-      const p = Math.min(1, Math.max(0, (out.twaAbs - 8) / 37)) * 0.6 + Math.min(1, out.speedKn / 2) * 0.4;
-      return { progress: p, done: out.twaAbs >= 45 && out.speedKn >= 2 };
+      const p = Math.min(1, Math.max(0, (out.twaAbs - 4) / 41)) * 0.6 + Math.min(1, Math.max(0, out.speedKn) / 2) * 0.4;
+      const note = out.sternway ? 'Задний ход: руль работает наоборот, держи его переложенным' : out.twaAbs < 40 ? (out.sheet < 50 ? 'Потрави шкот, пусть лодку понесёт назад' : 'Жди заднего хода и перекладывай руль') : 'Нос ушёл от ветра: руль прямо, подбирай шкот';
+      return { progress: p, done: out.twaAbs >= 45 && out.speedKn >= 2, note };
     },
   },
   {
@@ -28,7 +28,7 @@ export const LESSONS = [
     goal: 'Идёшь в бейдевинд левым галсом. Поверни носом через ветер и ляг в бейдевинд правым галсом (40–65° к ветру), сохранив ход 2 узла.',
     setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.heading = 45; state.vf = 2.5; ctl.sheet = 15; state.side = -1; },
     check(out, state, el) {
-      if (state.vf < 0.3 && el > 2) return { fail: 'Застрял в левентике: поворот делают с хода и плавно, руль 15–20°. Круче не надо, перо сорвёт поток и затормозит. Ещё раз!' };
+      if (state.vf < 0.2 && el > 3) return { fail: 'Застрял в левентике. Поворот делают с хода: руль перекладывают плавно, но решительно, до 25–30°, и не выпрямляют, пока нос не пройдёт ветер. Ещё раз!' };
       const crossed = out.TWA > 0; // ветер теперь справа
       const p = crossed ? 0.6 + 0.4 * Math.min(1, out.speedKn / 2) : 0.6 * Math.min(1, Math.max(0, (out.twaAbs < 45 ? 45 - out.twaAbs : 0) / 45));
       return { progress: p, done: crossed && out.twaAbs >= 40 && out.twaAbs <= 65 && out.speedKn >= 2, note: crossed ? 'Галс сменён — разгоняйся' : 'Приводись к ветру и проходи через левентик' };
@@ -65,6 +65,7 @@ export function createLessonRunner() {
     run.index = i; run.lesson = L; run.el = 0; run.mem = {}; run.status = 'running'; run.progress = 0; run.note = ''; run.fail = '';
     ctl.autoSheet = false; ctl.lockHeading = false; ctl.paused = false; ctl.rudder = 0; state.vs = 0; state.yawRate = 0; state.heel = 0;
     L.setup(state, ctl);
+    settleRig(state, ctl);
   }
   function stop(ctl) { if (run.lesson && run.lesson.teardown) run.lesson.teardown(ctl); run.status = 'idle'; run.lesson = null; run.index = -1; }
   function update(out, state, ctl, dt, course) {
