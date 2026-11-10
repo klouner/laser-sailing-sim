@@ -147,6 +147,14 @@ ui.rudder.addEventListener('input', () => { ctl.rudder = +ui.rudder.value; autop
 ui.rudder.addEventListener('change', () => { if (ui.rudderReturn.checked) { ctl.rudder = 0; ui.rudder.value = 0; } });
 ui.autoSheet.addEventListener('change', () => { setAutoSheet(ui.autoSheet.checked); });
 ui.lockHeading.addEventListener('change', () => { ctl.lockHeading = ui.lockHeading.checked; });
+// настройки паруса: авто или вручную
+const trimIds = ['vang', 'cunn', 'out'];
+function setAutoTrim(v) {
+  ctl.autoTrim = v; $('autoTrim').checked = v; setText('trim-mode', v ? 'авто' : 'вручную');
+  for (const id of trimIds) { $(id).disabled = v; if (!v) ctl[id] = state.trim[id]; }
+}
+$('autoTrim').addEventListener('change', (e) => setAutoTrim(e.target.checked));
+for (const id of trimIds) $(id).addEventListener('input', (e) => { ctl[id] = +e.target.value / 100; });
 $('gusts').addEventListener('change', (e) => { if (raceLocked() || lessons.run.status === 'running') { e.target.checked = false; toast('В уроках и гонке ветер ровный'); return; } ctl.gusts = e.target.checked; });
 
 $('btn-pause').addEventListener('click', togglePause);
@@ -541,6 +549,10 @@ function updateUI(out, dt) {
   setText('v-heading', `${Math.round(state.heading)}°`);
   setText('v-twa', `${Math.round(Math.abs(out.TWA))}° к ветру`);
   if (document.activeElement !== ui.heading) ui.heading.value = Math.round(state.heading);
+  for (const id of trimIds) {
+    const pc = Math.round((ctl.autoTrim ? state.trim[id] : ctl[id]) * 100);
+    setText('v-' + id, pc + '%'); if (ctl.autoTrim && document.activeElement !== el(id)) el(id).value = pc;
+  }
   setText('v-sheet', `${Math.round(out.sheet)}°` + (ctl.autoSheet ? ' (авто)' : ''));
   if (ctl.autoSheet) ui.sheet.value = Math.round(out.sheet);
   const r = Math.round(ctl.rudder);

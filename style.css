@@ -259,3 +259,7 @@ details[open] summary::before{transform:rotate(90deg)}
 @media (max-width:899px){.fps{left:auto;right:8px;top:calc(8px + env(safe-area-inset-top,0px));padding:3px 8px;font-size:10px}}
 #cam-seg{flex-wrap:wrap}
 #cam-seg button{flex:1 1 30%}
+.trim{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.trim summary small{text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400}
+.trim .row small{white-space:nowrap}
+input[type=range]:disabled{opacity:.45}

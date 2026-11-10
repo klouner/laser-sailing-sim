@@ -54,7 +54,7 @@ for (const lim of [15, 30]) { const [s, c] = mk((s, c) => { c.windSpeed = 10; s.
   console.log(`руль до ${lim}°:`, 'снова на ходу через', tDone === null ? 'НЕ ВЫШЛА' : f(tDone) + ' с', '| мин. ход', f(minV), 'уз | макс. скорость поворота', f(maxR, 0), '°/с'); }
 
 console.log('— Поворот фордевинд 160°→200° —');
-for (const [wind, sheet] of [[10, 90], [10, 40], [16, 90], [16, 40], [22, 90]]) {
+for (const [wind, sheet] of [[10, 90], [10, 40], [16, 90], [16, 40], [22, 90], [22, 45]]) {
   const [s, c] = mk((s, c) => { c.windSpeed = wind; s.heading = 160; s.vf = 2.5; c.sheet = sheet; });
   for (let i = 0; i < 8 / DT; i++) { steer(s, c, 160); step(s, c, DT); }
   let maxHeel = 0, caps = false, maxYaw = 0;

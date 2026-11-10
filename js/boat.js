@@ -517,12 +517,15 @@ export function createBoat(env0 = null) {
   slvGeo.setAttribute('position', new THREE.BufferAttribute(slvPos, 3)); slvGeo.setIndex(slvIdx);
   const sleeve = new THREE.Mesh(slvGeo, new THREE.MeshStandardMaterial({ color: '#f1f0ea', roughness: 0.9, side: THREE.DoubleSide }));
   sleeve.castShadow = true; sleeve.frustumCulled = false; sleeve.userData.keep = true; rig.add(sleeve);
+  // изгиб мачты: оттяжка, шкот и каннингхэм гнут топ назад, парус от этого становится площе
+  let mastBend = 0;
+  const bendAt = (v) => mastBend * v * v;
   // angleAt(v) — куда смотрит хвост кармана на высоте v (0 у гика, 1 у топа)
   function updateSleeve(angleAt) {
     for (let i = 0; i <= SLV_H; i++) {
       const f = i / SLV_H, h = slvY0 + (slvY1 - slvY0) * f, r = 0.046 - 0.016 * f;
-      const cx = -RAKE * h / MAST_H, v = (h - (BOOM_H + 0.03)) / (MAST_H - 0.05 - BOOM_H - 0.03);
-      const phi = angleAt(Math.min(1, Math.max(0, v))), cs = Math.cos(phi), sn = Math.sin(phi);
+      const v = Math.min(1, Math.max(0, (h - (BOOM_H + 0.03)) / (MAST_H - 0.05 - BOOM_H - 0.03))), cx = -RAKE * h / MAST_H - bendAt(v);
+      const phi = angleAt(v), cs = Math.cos(phi), sn = Math.sin(phi);
       for (let j = 0; j < SLV_P; j++) {
         const lx = j < SLV_M ? slvShape[j][0] * r : -SLV_TAIL * (1 - 0.35 * f), lz = j < SLV_M ? slvShape[j][1] * r : 0;
         const o = (i * SLV_P + j) * 3;
@@ -533,7 +536,7 @@ export function createBoat(env0 = null) {
   }
   updateSleeve(() => 0);
   const mastTopCap = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.1, 12), matDark);
-  mastTopCap.position.copy(mastAt(MAST_H)); mastTopCap.rotation.z = mastTilt; rig.add(mastTopCap);
+  mastTopCap.position.copy(mastAt(MAST_H)); mastTopCap.rotation.z = mastTilt; mastTopCap.userData.keep = true; rig.add(mastTopCap);
 
   // гик
   const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, BOOM_L, 16), matAlu);
@@ -681,9 +684,14 @@ export function createBoat(env0 = null) {
     flutterPhase += dt * (6 + out.AWS * 1.2);
     const power = Math.min(1, out.q / 60);
     const camberFrac = 0.025 + 0.085 * Math.min(1, aoa / 14) * (0.4 + 0.6 * power);
-    // твист: подобранный шкот (и оттяжка) закрывают верх; потравленный — верх открывается
-    const boomMag = Math.min(90, Math.abs(state.boom));
-    const twist = (6 + 16 * boomMag / 90) * DEG * (0.3 + 0.7 * Math.min(1, out.AWS / 6));
+    // настройки: оттяжка шкотового угла убирает пузо внизу, каннингхэм уплощает верх, оттяжка гика закрывает твист
+    const tr = out.trim || state.trim, boomMag = Math.min(90, Math.abs(state.boom));
+    const sheetPull = state.taut * THREE.MathUtils.clamp(1 - (boomMag - 8) / 25, 0, 1) * Math.min(1, out.Fmag / 150);
+    const bendTo = 0.03 + 0.13 * Math.max(tr.vang, sheetPull) + 0.05 * tr.cunn;
+    mastBend += (bendTo - mastBend) * Math.min(1, dt * 2);
+    mastTopCap.position.x = -RAKE - mastBend; windex.position.x = -RAKE * (MAST_H + 0.04) / MAST_H - mastBend;
+    const lowK = (0.55 + 0.9 * (1 - tr.out)) * (1 - 0.8 * mastBend), topK = (1 - 0.35 * tr.cunn) * (1 - 1.4 * mastBend);
+    const twist = (out.twist || 0) * DEG * 1.15;
     const pa = sailPos;
     for (let i = 0; i <= NU; i++) {
       const u = i / NU;
@@ -691,7 +699,7 @@ export function createBoat(env0 = null) {
         const v = j / NV;
         const kf = (i * (NV + 1) + j) * 3;
         const x = sailFlat[kf], y = sailFlat[kf + 1], chord = sailFlat[kf + 2], shape = sailShape[i];
-        let z = -side * camberFrac * chord * shape * (1 - 0.35 * v);
+        let z = -side * camberFrac * chord * shape * (1 - 0.35 * v) * (lowK + (topK - lowK) * v);
         z += -side * Math.sin(twist * v) * chord * u * 0.35 * power;
         if (full > 0) {
           const fl = 0.12 * Math.sin(flutterPhase * 1.3 + u * 7 + v * 3) * (0.25 + 0.75 * u) * (0.4 + 0.6 * (1 - v * 0.5));
@@ -701,7 +709,7 @@ export function createBoat(env0 = null) {
           z += side * bubble * Math.min(1, out.AWS / 3);
         }
         const k = (i * (NV + 1) + j) * 3;
-        pa[k] = x; pa[k + 1] = y; pa[k + 2] = z;
+        pa[k] = x - bendAt(v) * (1 - u) * (1 - u); pa[k + 1] = y; pa[k + 2] = z;
       }
     }
     sailGeo.attributes.position.needsUpdate = true;
