@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0b0c">
+<title>Лазер 3D · версия 2 — Сила ветра</title>
+<meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+<!-- Номер версии стоит у каждого модуля: после обновления сайта браузер не смешает новые файлы со старыми из кэша -->
+<script type="importmap">
+{
+  "imports": {
+    "babylon": "./vendor/babylon.js?v=1",
+    "./js/analytics.js": "./js/analytics.js?v=1",
+    "./js/audio.js": "./js/audio.js?v=1",
+    "./js/config.js": "./js/config.js?v=1",
+    "./js/course.js": "./js/course.js?v=1",
+    "./js/env.js": "./js/env.js?v=1",
+    "./js/hud.js": "./js/hud.js?v=1",
+    "./js/leaderboard.js": "./js/leaderboard.js?v=1",
+    "./js/lessons.js": "./js/lessons.js?v=1",
+    "./js/physics.js": "./js/physics.js?v=1",
+    "./js/polar.js": "./js/polar.js?v=1",
+    "./js/vec.js": "./js/vec.js?v=1",
+    "./js/gfx/world.js": "./js/gfx/world.js?v=1",
+    "./js/gfx/boat.js": "./js/gfx/boat.js?v=1",
+    "./js/gfx/view.js": "./js/gfx/view.js?v=1",
+    "./js/gfx/shaders.js": "./js/gfx/shaders.js?v=1",
+    "./js/model/geo.js": "./js/model/geo.js?v=1",
+    "./js/model/sailor.js": "./js/model/sailor.js?v=1"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <div id="labels"></div>
+
+  <div id="fps" class="fps" hidden></div>
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">&gt;&gt;&gt;</span>
+      <div>
+        <div class="title">Лазер&nbsp;3D</div>
+        <div class="subtitle">Сила ветра · версия 2</div>
+      </div>
+    </div>
+    <div id="status" class="status">
+      <div class="speedo">
+        <div class="speedo-main"><b id="speed-big">0.0</b><span>уз</span></div>
+        <div class="speedo-sub">VMG <b id="vmg-big">0.0</b></div>
+      </div>
+      <div class="status-text">
+        <div class="status-main">
+          <span id="pos-name" class="pos-name">Галфвинд</span>
+          <span id="tack-name" class="tack">правый галс</span>
+        </div>
+        <div id="hint" class="hint">Подтяните шкот, пока парус не перестанет заполаскивать</div>
+      </div>
+    </div>
+    <button id="btn-panel" class="icon-btn" title="Показать/скрыть панель">☰</button>
+    <div id="trainbar" class="trainbar" hidden>
+      <div class="tb-main">
+        <div class="tb-head"><span id="tb-tag" class="pos-name">УРОК 1/5</span><b id="tb-title">Выход из левентика</b><span id="tb-time" class="tb-time"></span></div>
+        <div id="tb-goal" class="tb-goal"></div>
+        <div class="tb-prog"><div id="tb-fill"></div></div>
+        <div id="tb-note" class="tb-note"></div>
+      </div>
+      <div class="tb-btns">
+        <button id="tb-next" class="btn" hidden>Дальше →</button>
+        <button id="tb-retry" class="btn secondary" title="Начать заново">↻</button>
+        <button id="tb-exit" class="btn secondary" title="Выйти">✕</button>
+      </div>
+    </div>
+  </header>
+
+  <aside id="panel">
+    <section class="card">
+      <h2>Ветер</h2>
+      <label class="row">
+        <span>Откуда дует <b id="v-windFrom">0°</b> <i id="v-windName">С</i></span>
+        <input type="range" id="windFrom" min="0" max="359" step="1" value="0">
+      </label>
+      <label class="row">
+        <span>Сила ветра <b id="v-windSpeed">10 уз</b></span>
+        <input type="range" id="windSpeed" min="2" max="25" step="0.5" value="10">
+      </label>
+      <div class="checks">
+        <label><input type="checkbox" id="gusts" checked> Порывы и заходы ветра <small>(±20%, ±9°)</small></label>
+        <label><input type="checkbox" id="compassWind"> Ветер по компасу телефона <small id="compassState"></small></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Лодка</h2>
+      <label class="row">
+        <span>Курс (нос) <b id="v-heading">90°</b> <i id="v-twa"></i></span>
+        <input type="range" id="heading" min="0" max="359" step="1" value="90">
+      </label>
+      <label class="row">
+        <span>Шкот — гик до <b id="v-sheet">45°</b> <small>(W/S или ↑/↓)</small></span>
+        <input type="range" id="sheet" min="8" max="90" step="1" value="45">
+      </label>
+      <label class="row">
+        <span>Руль <b id="v-rudder">прямо</b> <small>(A/D или ←/→)</small></span>
+        <input type="range" id="rudder" min="-35" max="35" step="1" value="0" class="center">
+      </label>
+      <div class="checks">
+        <label><input type="checkbox" id="autoSheet"> Автошкот (оптимальный угол атаки)</label>
+        <label><input type="checkbox" id="lockHeading"> Фиксировать курс (руль не поворачивает)</label>
+        <label><input type="checkbox" id="rudderReturn" checked> Руль сам возвращается в центр</label>
+        <label><input type="checkbox" id="holdCourse" checked> Матрос держит курс, когда руль отпущен</label>
+      </div>
+      <details class="trim" id="trim">
+        <summary>Настройки паруса <small id="trim-mode">авто</small></summary>
+        <div class="checks"><label><input type="checkbox" id="autoTrim" checked> Матрос настраивает сам по ветру и курсу</label></div>
+        <label class="row">
+          <span>Оттяжка гика <b id="v-vang">50%</b> <small>держит гик внизу</small></span>
+          <input type="range" id="vang" min="0" max="100" step="1" value="50" disabled>
+        </label>
+        <label class="row">
+          <span>Каннингхэм <b id="v-cunn">0%</b> <small>уплощает верх</small></span>
+          <input type="range" id="cunn" min="0" max="100" step="1" value="0" disabled>
+        </label>
+        <label class="row">
+          <span>Оттяжка шкотового угла <b id="v-out">45%</b> <small>убирает пузо</small></span>
+          <input type="range" id="out" min="0" max="100" step="1" value="45" disabled>
+        </label>
+      </details>
+      <div class="btns">
+        <button id="btn-pause" class="btn secondary">Пауза</button>
+        <button id="btn-reset" class="btn secondary">Сброс</button>
+        <button id="btn-tack" class="btn" title="Автоматически повернуть оверштаг">Оверштаг</button>
+      </div>
+    </section>
+
+    <section class="card" id="card-train">
+      <h2>Тренировка</h2>
+      <div class="lesson-list" id="lesson-list"></div>
+      <div class="btns">
+        <button id="btn-race" class="btn accent">Гонка на время</button>
+        <button id="btn-course" class="btn secondary" title="Трасса без таймера">Буи без таймера</button>
+      </div>
+      <div class="race-help">Трасса: от ворот к оранжевому бую (110 м против ветра), обогнуть его с любой стороны и финишировать между синими буями. Ветер ровный, 10 уз с севера; автошкот и автоповорот выключены.</div>
+    </section>
+
+    <section class="card">
+      <h2>Приборы</h2>
+      <div class="grid">
+        <div class="stat"><span>Скорость</span><b id="s-speed">0.0 уз</b></div>
+        <div class="stat"><span>VMG</span><b id="s-vmg">0.0 уз</b></div>
+        <div class="stat"><span>Вымпельный ветер</span><b id="s-aws">10 уз · 90°</b></div>
+        <div class="stat"><span>Угол атаки паруса</span><b id="s-aoa">0°</b></div>
+        <div class="stat"><span>Крен</span><b id="s-heel">0°</b></div>
+        <div class="stat"><span>Дрейф</span><b id="s-leeway">0°</b></div>
+        <div class="stat"><span>От целевой скорости</span><b id="s-target">—</b></div>
+        <div class="stat"><span>Заход ветра</span><b id="s-shift">—</b></div>
+        <div class="stat wide"><span>Парус</span><b id="s-sail">—</b></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Вид</h2>
+      <div class="seg" id="cam-seg">
+        <button data-cam="chase" class="active">За лодкой</button>
+        <button data-cam="top">Сверху</button>
+        <button data-cam="side">Сбоку</button>
+        <button data-cam="cockpit">Из кокпита</button>
+        <button data-cam="free">Свободно</button>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="showTrue" checked> <span class="sw" style="--c:#0047ff"></span>Истинный ветер</label>
+        <label><input type="checkbox" id="showApp" checked> <span class="sw" style="--c:#8db0ff"></span>Вымпельный ветер</label>
+        <label><input type="checkbox" id="showVel" checked> <span class="sw" style="--c:#ffffff"></span>Скорость лодки</label>
+        <label><input type="checkbox" id="showForce" checked> <span class="sw" style="--c:#ff5700"></span>Сила на парусе</label>
+        <label><input type="checkbox" id="showNoGo" checked> <span class="sw" style="--c:#ff3b30"></span>Мёртвая зона</label>
+        <label><input type="checkbox" id="showLabels" checked> Подписи у стрелок</label>
+        <label><input type="checkbox" id="showSailor" checked> Матрос</label>
+        <label><input type="checkbox" id="soundOn" checked> Звук</label>
+        <label><input type="checkbox" id="showFps"> Счётчик кадров</label>
+      </div>
+      <div class="row-head"><span>Время суток</span></div>
+      <div class="seg" id="sky-seg">
+        <button data-sky="morning">Утро</button>
+        <button data-sky="day" class="active">День</button>
+        <button data-sky="sunset">Закат</button>
+        <button data-sky="overcast">Пасмурно</button>
+      </div>
+      <div class="row-head"><span>Качество графики</span><small id="q-now"></small></div>
+      <div class="seg" id="q-seg">
+        <button data-q="auto" class="active">Авто</button>
+        <button data-q="low">Низкое</button>
+        <button data-q="med">Среднее</button>
+        <button data-q="high">Высокое</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>Как это работает</summary>
+        <div class="theory">
+          <p><b>Ветер</b> задаётся компасным направлением, <em>откуда</em> он дует. Синяя стрелка — истинный ветер. Голубая — вымпельный: тот, что чувствует парус с учётом хода лодки. Чем быстрее лодка, тем сильнее вымпельный ветер заходит вперёд.</p>
+          <p><b>Курсы относительно ветра.</b> Левентик (носом в ветер, ±45°) — мёртвая зона, парус полощет и лодка останавливается. Бейдевинд — острый курс против ветра, галфвинд — ветер в борт, бакштаг — ветер сзади-сбоку, фордевинд — ветер в корму.</p>
+          <p><b>Шкот</b> ограничивает, насколько гик может уйти под ветер. Парус работает как крыло: нужен угол атаки ≈ 10–25° к вымпельному ветру. Если шкот перетравлен — парус заполаскивает (нет тяги). Если перебран — поток срывается, тяга падает, крен растёт. На фордевинде парус стоит поперёк и работает как парашют.</p>
+          <p><b>Руль.</b> Лодка поворачивает туда, куда переложено перо руля. Румпель при этом двигается в <em>противоположную</em> сторону: румпель влево — лодка направо. Руль работает только на ходу: без скорости лодка не слушается. Перо руля это тоже крыло. Резко переложенное до упора, оно срывает поток: лодка тормозит, а поворачивает хуже. Для оверштага хватает плавных 25–30°.</p>
+          <p><b>Задний ход.</b> Если лодка встала носом к ветру, её понесёт кормой вперёд. На заднем ходу руль работает наоборот: румпель кладут в ту сторону, куда нужно увести нос, шкот травят и ждут, пока лодка встанет на галс. Потом руль прямо, шкот добрать.</p>
+          <p><b>Руление парусом.</b> Подобранный парус и крен приводят лодку к ветру, потравленный шкот помогает увалиться. Если матрос «держит курс», видно, сколько руля на это уходит: чем больше руля, тем сильнее торможение. Хорошо настроенная лодка идёт почти с прямым рулём.</p>
+          <p><b>Настройки паруса.</b> Оттяжка гика держит гик внизу: без неё на полных курсах верх паруса раскрывается и теряет тягу, а на фордевинде в свежий ветер лодку начинает раскачивать. Каннингхэм и оттяжка шкотового угла делают парус площе: в слабый ветер их отпускают, парусу нужно пузо, в свежий набивают, чтобы снять крен и сопротивление. По умолчанию матрос настраивает всё сам.</p>
+          <p><b>Шверт</b> держит лодку от сноса только на ходу. Без скорости он срывает поток и лодку несёт боком, поэтому сначала разгон, потом острый курс.</p>
+          <p><b>Галс</b> определяется бортом, с которого дует ветер: ветер справа — правый галс (гик слева). Поворот носом через ветер — оверштаг, кормой — фордевинд (гик резко перелетает!).</p>
+          <p><b>Крен и откренивание.</b> Боковая сила на парусе кренит лодку; матрос откренивает, вывешиваясь на наветренный борт. Накренённая лодка сама приводится к ветру — приходится держать руль.</p>
+          <p><b>Целевая скорость.</b> Прибор «От целевой скорости» сравнивает ваш ход с полярой лодки: лучшей скоростью на этом курсе и ветре. 100% значит, что лодка настроена и идёт как может. Меньше 90%: что-то не так со шкотом, креном или рулём.</p>
+          <p><b>Заход ветра.</b> Ветер гуляет по направлению. Если он отошёл так, что можно идти острее, это «лифт»: держите галс. Если зашёл навстречу, это «хедер»: на лавировке пора подумать о повороте.</p>
+          <p><b>VMG</b> — скорость сближения с ветром (или удаления от него): на лавировке максимум VMG обычно в остром бейдевинде ~45°, а не в самом остром курсе.</p>
+        </div>
+      </details>
+    </section>
+    <footer class="foot">Мышь/палец: вращать камеру · колесо: зум · Space — пауза · R — сброс · C — камера<br>Тренажёр для учеников парусной школы <a href="https://silavetra.com" target="_blank" rel="noopener">«Сила ветра»</a></footer>
+    <p class="privacy">Сайт собирает техническую статистику посещений: IP-адрес, устройство, время на сайте и пройденные уроки. <span id="ver"></span></p>
+  </aside>
+
+  <div id="hud">
+    <canvas id="minimap" width="300" height="300"></canvas>
+    <div class="hud-cap">Вид сверху: север вверху</div>
+  </div>
+
+  <div id="touch">
+    <div class="t-actions">
+      <button id="t-pause" class="t-btn" title="Пауза"><svg class="ico pause" viewBox="0 0 20 20"><path d="M7 4v12M13 4v12"/></svg><svg class="ico play" viewBox="0 0 20 20"><path d="M6 4l10 6-10 6z"/></svg></button>
+      <button id="t-cam" class="t-btn" title="Камера"><svg class="ico" viewBox="0 0 20 20"><path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="2.8"/></svg></button>
+      <button id="t-tack" class="t-btn"><svg class="ico" viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 0 2-4.5"/><path d="M4 3v3.5h3.5"/></svg><span class="tx">Оверштаг</span></button>
+      <button id="t-compass" class="t-btn" title="Ветер по компасу телефона"><svg class="ico" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M12.6 7.4l-1.5 3.7-3.7 1.5 1.5-3.7z"/></svg></button>
+      <button id="t-auto" class="t-btn">Авто</button>
+      <button id="t-train" class="t-btn" title="Уроки и гонка"><svg class="ico" viewBox="0 0 20 20"><path d="M5 17V3"/><path d="M5 4h10l-2.5 3.5L15 11H5"/></svg></button>
+      <button id="t-panel" class="t-btn" title="Настройки"><svg class="ico" viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/></svg></button>
+    </div>
+    <div class="t-wind">
+      <button id="t-windL" class="t-btn">↺ −10°</button>
+      <button id="t-windChip" class="t-chip">Ветер 0° С · 10 уз</button>
+      <button id="t-windR" class="t-btn">+10° ↻</button>
+    </div>
+    <div class="t-pads">
+      <div id="t-rudder" class="pad pad-h">
+        <div class="pad-label"><span>← Руль →</span><b id="t-rudder-val">прямо</b></div>
+        <div class="pad-track"><div class="pad-center"></div><div class="pad-thumb" id="t-rudder-thumb"></div></div>
+        <div class="pad-sub">тяни влево/вправо — отпусти, вернётся</div>
+      </div>
+      <div id="t-sheet" class="pad pad-v">
+        <div class="pad-label"><span>Шкот</span><b id="t-sheet-val">45°</b></div>
+        <div class="pad-track"><div class="pad-thumb" id="t-sheet-thumb"></div></div>
+        <div class="pad-sub">▲ подобрать<br>▼ потравить</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lb" class="lb">
+    <button id="lb-chip" class="lb-chip"><svg class="ico" viewBox="0 0 20 20"><path d="M6 3h8v5a4 4 0 0 1-8 0z"/><path d="M6 5H3.5a2.5 2.5 0 0 0 2.7 3M14 5h2.5a2.5 2.5 0 0 1-2.7 3M10 12v3M7 17h6"/></svg><span id="lb-best">Рекордов пока нет</span></button>
+    <div id="lb-list" class="lb-list" hidden>
+      <div class="lb-title">Топ-10 гонки <small id="lb-scope"></small></div>
+      <ol id="lb-ol"></ol>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="name-modal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-tag">Новый рекорд</div>
+      <div class="modal-time" id="modal-time">2:31.4</div>
+      <div class="modal-text">Ты в топ-10! Как тебя записать?</div>
+      <input id="name-input" maxlength="18" placeholder="Имя" autocomplete="off">
+      <div class="btns"><button id="name-ok" class="btn">Записать</button><button id="name-skip" class="btn secondary">Пропустить</button></div>
+    </div>
+  </div>
+
+  <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
+</div>
+<script type="module" src="js/main.js?v=1"></script>
+</body>
+</html>
