@@ -341,13 +341,10 @@ export function createBoat(world, env, opts = {}) {
   const bodyM = mesh('body', sailor, matBody, sailorG, { updatable: true }), bodyNrm = new Float32Array(sailor.positions.length);
   const headRoll = new B.TransformNode('headRoll', scene); headRoll.parent = sailorG;     // держит голову прямо, когда лодка лежит на борту
   const headG = new B.TransformNode('head', scene); headG.parent = headRoll;
-  { const add = (m, mat, pos, scale, rot) => { m.material = mat; m.parent = headG; m.position.set(pos[0], pos[1], pos[2]); if (scale) m.scaling.set(scale[0], scale[1], scale[2]); if (rot) m.rotation.set(rot[0], rot[1], rot[2]); m.isPickable = false; reg(m); return m; };
-    add(sph(0.102, 18), matSkin, [0, 0, 0], [1, 1.1, 0.94]);
-    add(sph(0.02, 8), matSkin, [0.1, -0.012, 0]);
-    for (const s of [-1, 1]) add(sph(0.022, 8), matSkin, [0, 0, s * 0.097]);
-    add(B.CreateSphere('cap', { diameter: 0.216, segments: 18, slice: 0.5 }, scene), matCap, [0, 0.028, 0], [1, 0.92, 0.96]);
-    add(B.CreateCylinder('visor', { diameter: 0.21, height: 0.01, tessellation: 20, arc: 0.5 }, scene), matCap, [0.055, 0.034, 0], [1, 1, 0.9], [0, Math.PI / 2, 0]);
-    add(box(0.03, 0.036, 0.172), matGlass, [0.086, 0.012, 0]); }
+  // голова, кепка и очки: готовые формы из модели
+  { const H = sailor.head;
+    matCap.albedoColor = new B.Color3(1, 1, 1); matCap.backFaceCulling = false; matCap.twoSidedLighting = true; matGlass.backFaceCulling = false; matGlass.twoSidedLighting = true;
+    mesh('headSkin', H.skin, matBody, headG); mesh('cap', H.cap, matCap, headG); mesh('glasses', H.glasses, matGlass, headG); }
 
   // неподвижные детали склеиваются по материалу и родителю: меньше вызовов отрисовки
   { const groups = new Map();

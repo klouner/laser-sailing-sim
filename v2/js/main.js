@@ -407,7 +407,7 @@ let wasCapsized = false;
 function updateTraining(out, dt, t) {
   if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running' && !lessons.run.lesson.allowCapsize) { lessons.run.status = 'failed'; stats.track('lesson', { id: lessons.run.lesson.id, result: 'failed', why: 'capsize' }); lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
   wasCapsized = !!out.capsized;
-  if (wasCapsized !== capUI) { capUI = wasCapsized; $('btn-bow').hidden = !capUI; $('btn-tack').textContent = capUI ? 'Встать на шверт' : 'Оверштаг'; $('btn-tack').classList.toggle('accent', capUI); if (!capUI) ctl.swimBow = false; }
+  if (wasCapsized !== capUI) { capUI = wasCapsized; $('btn-bow').hidden = !capUI; $('btn-tack').textContent = capUI ? 'Встать на шверт' : 'Оверштаг'; $('btn-tack').classList.toggle('accent', capUI); $('t-tack').querySelector('.tx').textContent = capUI ? 'На шверт' : 'Оверштаг'; if (!capUI) ctl.swimBow = false; }
   $('btn-bow').classList.toggle('on', !!ctl.swimBow);
   if (mode === 'race') {
     const r = course.race;

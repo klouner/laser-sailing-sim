@@ -1,99 +1,8 @@
-// Матрос: тело одной оболочкой и расчёт поз. Позы перенесены из первой версии тренажёра без изменений в логике:
+// Матрос: расчёт поз; саму фигуру строит body.js. Позы перенесены из первой версии тренажёра без изменений в логике:
 // посадка по положению центра тяжести из физики, откренивание, пригибание под гиком, переход на другой борт,
 // перехват рук после поворота. От графического движка модуль не зависит: наружу отдаются массивы вершин.
 import { V3, clamp, smoothstep, DEG } from '../vec.js';
-
-// торс: [расстояние вдоль корпуса от таза, полуширина по линии плеч, полутолщина, цвет]
-const TORSO_RINGS = [
-  [-0.125, 0.002, 0.002, 'pants'], [-0.10, 0.115, 0.095, 'pants'], [-0.04, 0.182, 0.150, 'pants'], [0.02, 0.182, 0.150, 'pants'], [0.058, 0.170, 0.120, 'pants'],
-  [0.064, 0.166, 0.112, 'top'], [0.10, 0.160, 0.104, 'top'], [0.134, 0.160, 0.104, 'top'],
-  [0.140, 0.186, 0.130, 'vest'], [0.186, 0.196, 0.137, 'vest'], [0.190, 0.202, 0.142, 'trim'], [0.216, 0.205, 0.144, 'trim'], [0.220, 0.200, 0.140, 'vest'],
-  [0.335, 0.216, 0.149, 'vest'], [0.415, 0.207, 0.143, 'vest'], [0.452, 0.165, 0.118, 'vest'],
-  [0.458, 0.150, 0.100, 'top'], [0.492, 0.085, 0.070, 'top'], [0.500, 0.056, 0.056, 'skin'], [0.585, 0.050, 0.050, 'skin'], [0.60, 0.002, 0.002, 'skin'],
-];
-// конечность: путь из четырёх точек (плечо, локоть, запястье, кончики пальцев или бедро, колено, щиколотка, носок)
-const ARM_SPEC = { rad: [[0, 0.060], [1, 0.047], [1.9, 0.036], [2.3, 0.045], [3, 0.036]], split: 1.93, a: 'top', b: 'glove', f1: 0.07, f2: 0.02 };
-const LEG_SPEC = { rad: [[0, 0.092], [1, 0.066], [1.92, 0.047], [2.25, 0.053], [3, 0.046]], split: 1.82, a: 'pants', b: 'boot', f1: 0.09, f2: 0.045 };
-const LIMB_RINGS = 3 + 2 + 5 + 2 + 4 + 2 + 2, SIDES = 12, NECK_T = 0.47;
-const COLORS = { pants: [0.012, 0.014, 0.02], top: [0.02, 0.045, 0.11], vest: [1.0, 0.13, 0.0], trim: [0.012, 0.012, 0.012], skin: [0.58, 0.31, 0.19], glove: [0.016, 0.016, 0.016], boot: [0.016, 0.016, 0.018] };
-const THIGH = 0.44, SHIN = 0.43, ARM1 = 0.30, ARM2 = 0.28;
-
-function makeBody() {
-  const S = SIDES, nRings = TORSO_RINGS.length + 4 * LIMB_RINGS, nV = nRings * S;
-  const pos = new Float32Array(nV * 3), col = new Float32Array(nV * 4).fill(1), idx = [];
-  let r0 = 0;
-  for (const n of [TORSO_RINGS.length, LIMB_RINGS, LIMB_RINGS, LIMB_RINGS, LIMB_RINGS]) {
-    for (let i = 0; i < n - 1; i++) for (let j = 0; j < S; j++) { const a = (r0 + i) * S + j, b = (r0 + i) * S + (j + 1) % S, c = a + S, d = b + S; idx.push(a, b, c, b, d, c); }
-    r0 += n;
-  }
-  const cs = [], sn = []; for (let j = 0; j < S; j++) { cs.push(Math.cos(j / S * Math.PI * 2)); sn.push(Math.sin(j / S * Math.PI * 2)); }
-  let ring = 0, hidden = 0;
-  const T = new V3(), N = new V3(), Bn = new V3(), c0 = new V3(), d1 = new V3(), d2 = new V3(), d3 = new V3();
-  const A1 = new V3(), A2 = new V3(), B1 = new V3(), B2 = new V3(), tmp = new V3();
-  function put(c, n, b, ra, rb, color) {
-    let o = ring * S * 3, oc = ring * S * 4;
-    for (let j = 0; j < S; j++, o += 3, oc += 4) {
-      const x = cs[j] * ra, y = sn[j] * rb;
-      pos[o] = c.x + n.x * x + b.x * y; pos[o + 1] = c.y + n.y * x + b.y * y; pos[o + 2] = c.z + n.z * x + b.z * y;
-      col[oc] = color[0]; col[oc + 1] = color[1]; col[oc + 2] = color[2];
-    }
-    ring++;
-  }
-  const radAt = (spec, w) => { const r = spec.rad; for (let i = 1; i < r.length; i++) if (w <= r[i][0]) { const u = (w - r[i - 1][0]) / (r[i][0] - r[i - 1][0]); return r[i - 1][1] + (r[i][1] - r[i - 1][1]) * Math.max(0, u); } return r[r.length - 1][1]; };
-  // кольцо конечности: нормаль переносится с предыдущего кольца без закручивания
-  function limbRing(c, t, w, spec, hide, scale = 1) {
-    N.addScaledVector(t, -N.dot(t)); if (N.lengthSq() < 1e-8) N.set(t.y, -t.x, 0); N.normalize();
-    Bn.crossVectors(t, N);
-    const r = hide ? 0.0005 : radAt(spec, w) * scale;
-    // скрытые кольца стягиваются в центр первого видимого: срез получается плоским
-    if (!hide && hidden > 0) { for (let o = (ring - hidden) * S * 3; o < ring * S * 3; o += 3) { pos[o] = c.x; pos[o + 1] = c.y; pos[o + 2] = c.z; } hidden = 0; }
-    if (hide) hidden++;
-    put(c, N, Bn, r, r, COLORS[w < spec.split ? spec.a : spec.b]);
-  }
-  // hideTo — координата пути, до которой часть скрыта (вид из глаз: плечо и верх руки не рисуются)
-  function limb(p0, p1, p2, p3, spec, pole, hideTo = -1) {
-    d1.subVectors(p1, p0); const L1 = d1.length() || 1e-4; d1.multiplyScalar(1 / L1);
-    d2.subVectors(p2, p1); const L2 = d2.length() || 1e-4; d2.multiplyScalar(1 / L2);
-    d3.subVectors(p3, p2); const L3 = d3.length() || 1e-4; d3.multiplyScalar(1 / L3);
-    const f1 = Math.min(spec.f1, L1 * 0.45, L2 * 0.4), f2 = Math.min(spec.f2, L2 * 0.4, L3 * 0.45);
-    A1.copy(p1).addScaledVector(d1, -f1); A2.copy(p1).addScaledVector(d2, f1);
-    B1.copy(p2).addScaledVector(d2, -f2); B2.copy(p2).addScaledVector(d3, f2);
-    N.crossVectors(d1, d2); if (N.lengthSq() < 1e-6) N.copy(pole);
-    const hid = (w) => w < hideTo; hidden = 0;
-    const rs = radAt(spec, 0);
-    limbRing(c0.copy(p0).addScaledVector(d1, -rs * 0.7), d1, 0, spec, hid(0), 0.03);
-    limbRing(c0.copy(p0).addScaledVector(d1, -rs * 0.4), d1, 0, spec, hid(0), 0.78);
-    limbRing(c0.copy(p0), d1, 0, spec, hid(0));
-    for (const u of [0.5, 1]) limbRing(c0.copy(p0).lerp(A1, u), d1, u * (1 - f1 / L1), spec, hid(u * (1 - f1 / L1)));
-    for (const t of [0.2, 0.4, 0.6, 0.8, 1]) {
-      const k = 1 - t;
-      c0.set(k * k * A1.x + 2 * k * t * p1.x + t * t * A2.x, k * k * A1.y + 2 * k * t * p1.y + t * t * A2.y, k * k * A1.z + 2 * k * t * p1.z + t * t * A2.z);
-      T.copy(d1).lerp(d2, t).normalize();
-      const w = 1 + (t - 0.5) * 0.3; limbRing(c0, T, w, spec, hid(w));
-    }
-    for (const u of [0.5, 1]) { const w = 1.15 + u * (0.85 - f2 / L2); limbRing(c0.copy(A2).lerp(B1, u), d2, w, spec, hid(w)); }
-    for (const t of [0.25, 0.5, 0.75, 1]) {
-      const k = 1 - t;
-      c0.set(k * k * B1.x + 2 * k * t * p2.x + t * t * B2.x, k * k * B1.y + 2 * k * t * p2.y + t * t * B2.y, k * k * B1.z + 2 * k * t * p2.z + t * t * B2.z);
-      T.copy(d2).lerp(d3, t).normalize();
-      limbRing(c0, T, 2 + (t - 0.5) * 0.2, spec, false);
-    }
-    for (const u of [0.5, 1]) limbRing(c0.copy(B2).lerp(p3, u), d3, 2.1 + u * 0.9, spec, false);
-    const re = radAt(spec, 3);
-    limbRing(c0.copy(p3).addScaledVector(d3, re * 0.45), d3, 3, spec, false, 0.75);
-    limbRing(c0.copy(p3).addScaledVector(d3, re * 0.75), d3, 3, spec, false, 0.03);
-  }
-  // торс: жёсткий, вдоль dir от таза; ax — линия плеч; neck — куда идёт шея
-  function torso(hip, dir, ax, hide, neck) {
-    N.copy(ax).addScaledVector(dir, -ax.dot(dir)).normalize(); Bn.crossVectors(dir, N);
-    for (const [t, a, b, c] of TORSO_RINGS) {
-      tmp.copy(hip).addScaledVector(dir, hide ? 0 : Math.min(t, NECK_T));
-      if (!hide && t > NECK_T) tmp.addScaledVector(neck, t - NECK_T);
-      put(tmp, N, Bn, hide ? 0.0005 : a, hide ? 0.0005 : b, COLORS[c]);
-    }
-  }
-  return { positions: pos, colors: col, indices: new Uint32Array(idx), torso, limb, begin() { ring = 0; } };
-}
+import { makeBody, buildHead, THIGH, SHIN, ARM1, ARM2, NECK_T } from './body.js';
 
 // Кисть не дальше вытянутой руки: цель подтягивается к плечу
 function clampReach(shoulder, hand, reach) {
@@ -134,7 +43,7 @@ export function createSailor(g) {
     const side = tv().set(0, -Math.sin(h), Math.cos(h));              // горизонталь поперёк лодки
     const swim = c.swim || (state.capsized < 1.6 && !state.righting);
     const hip = P.hip, dir = P.tmp, ax = P.ax;
-    const hands = [P.handA, P.handB], feet = [tv(), tv()], pole = tv();
+    const hands = [P.handA, P.handB], feet = [tv(), tv()], pole = tv(), front = tv(), toeDir = tv();
     body.begin();
     if (swim) {
       const bow = !!c.swim, ax0 = bow ? 2.5 : 0.25;
@@ -147,6 +56,8 @@ export function createSailor(g) {
         feet[i].copy(hip).addScaledVector(up, -0.8); feet[i].x += bow ? 0.25 + o : o * 1.6;
       }
       pole.set(bow ? 1 : 0, 0, 0).addScaledVector(side, bow ? 0 : -cs);
+      if (bow) front.set(-1, 0, 0); else front.copy(side).multiplyScalar(cs);
+      toeDir.copy(up).multiplyScalar(-0.17).addScaledVector(front, 0.06);        // в воде ноги висят, носки вниз
       res.headYaw = bow ? Math.PI : cs * Math.PI / 2;
     } else {
       // на шверте: ноги у самого днища, корпус навален на борт; когда лодка пошла, матрос откидывается назад
@@ -156,21 +67,21 @@ export function createSailor(g) {
       ax.set(1, 0, 0);
       for (let i = 0; i < 2; i++) { const o = i ? 0.17 : -0.17; hands[i].set(0.45 + o, 0.33, cs * 0.69); feet[i].set(0.42 + o * 0.9, -0.34, cs * 0.03); }
       pole.set(0, -1, cs * 0.2);
+      front.set(0, 1, 0); toeDir.set(0, 0.19, 0);                                // стоит лицом к днищу, носки к лодке
       res.headYaw = cs * Math.PI / 2;
     }
     P.shoulder.copy(hip).addScaledVector(dir, 0.46);
     const neck = P.neck.copy(dir).lerp(up, 0.7).normalize();
-    body.torso(hip, dir, ax, false, neck);
+    body.torso(hip, dir, ax, false, neck, front);
     res.head.copy(hip).addScaledVector(dir, NECK_T).addScaledVector(neck, 0.655 - NECK_T);
     res.headTilt = 0.05; res.headRoll = h; res.inWater = swim;
     for (let i = 0; i < 2; i++) {
       const o = i ? 0.165 : -0.165, sh = tv().copy(P.shoulder).addScaledVector(ax, o), hj = tv().copy(hip).addScaledVector(ax, o * 0.6);
       clampReach(sh, hands[i], ARM1 + ARM2 - 0.02); clampReach(hj, feet[i], THIGH + SHIN - 0.02);
       const el = solveElbow(sh, hands[i], ARM1, ARM2, tv().copy(up).multiplyScalar(-1), i ? P.elbowB : P.elbowA);
-      const fd = tv().subVectors(hands[i], el).normalize();
-      body.limb(sh, el, tv().copy(hands[i]).addScaledVector(fd, -0.05), tv().copy(hands[i]).addScaledVector(fd, 0.06), ARM_SPEC, ax);
+        body.arm(i, sh, el, hands[i], ax, false, ax);
       solveElbow(hj, feet[i], THIGH, SHIN, pole, P.knee);
-      body.limb(hj, P.knee, feet[i], tv().copy(feet[i]).addScaledVector(pole, 0.19), LEG_SPEC, pole);
+      body.leg(i, hj, P.knee, feet[i], tv().copy(feet[i]).add(toeDir), pole);
     }
     // после подъёма матрос оказывается на том борту, через который влез
     SS.sgn = cs; SS.y = cs * 0.5; SS.crouch = 0; SS.swap = 1; SS.flip = 0; SS.duck = 0; SS.theta = 0.3;
@@ -242,13 +153,16 @@ export function createSailor(g) {
     const before = SS.y * SS.sgn < 0, cAx = 1 - Math.abs(sv);
     const ax = P.ax.set(1 - cAx, 0, (before ? -1 : 1) * cAx * SS.sgn).normalize();
     body.begin();
-    body.torso(P.hip, dir, ax, firstPerson, neck);
-    res.head.copy(P.headP); res.headYaw = sv * 0.35 * (1 - h * 0.4); res.headTilt = 0.1 + 0.14 * h;
+    // грудь смотрит внутрь лодки, при переходе — к носу
+    const front = tv().set(cAx, 0, (before ? SS.sgn : -SS.sgn) * (1 - cAx) - 1e-4 * SS.sgn);
+    body.torso(P.hip, dir, ax, firstPerson, neck, front);
+    res.head.copy(P.headP); res.headYaw = sv * 0.35 * (1 - h * 0.4); res.headTilt = 0.02 + 0.1 * h;
     const shA = tv().copy(P.shoulder).addScaledVector(ax, -0.165); shA.y -= 0.02; shA.z += sv * 0.02;      // заднее плечо
     const shB = tv().copy(P.shoulder).addScaledVector(ax, 0.165); shB.y -= 0.02; shB.z += sv * 0.02;       // переднее
     // ноги: стопы под ремнём откренивания, колено сгибается вверх; чем дальше матрос вывешивается, тем прямее ноги
     const toeA = 0.5 * (1 - crouch), toeS = sv >= 0 ? -1 : 1;
     const half = g.cockpitHalfWidth(SS.x) - 0.1;
+    let li = 0;
     for (const off of [0.12, -0.12]) {
       const leg = Math.sign(off) * (before ? -1 : 1) * SS.sgn;
       const poleLeg = tv().set(0.6 * crouch, 1 - 0.45 * crouch, sv * 0.25 * (1 - crouch) + leg * 1.1 * crouch);
@@ -261,7 +175,7 @@ export function createSailor(g) {
       const deckK = g.deckAt(P.knee.x) + (g.cockpitSDF(P.knee.x, P.knee.z) < 0 ? -g.COCKPIT.depth : 0) + 0.085;
       if (P.knee.y < deckK) P.knee.y = deckK;
       const toe = tv().set(ft.x + 0.19 * crouch, ft.y + Math.sin(toeA) * 0.19 * (1 - crouch), ft.z + toeS * Math.cos(toeA) * 0.19 * (1 - crouch));
-      body.limb(hipJ, P.knee, ft, toe, LEG_SPEC, poleLeg);
+      body.leg(li++, hipJ, P.knee, ft, toe, poleLeg);
     }
     // руки
     const REACH = ARM1 + ARM2 - 0.02, run = twa >= 150, sm = (e0, e1, x) => smoothstep(x, e0, e1);
@@ -311,10 +225,10 @@ export function createSailor(g) {
     const backB = before ? 0 : (sw < 1 ? 1 - sm(0.34, 0.6, sw) : 0), outS = cAx > 0.5 ? SS.sgn : sv;
     solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-1 + 0.5 * poleBack, -0.6 + 0.3 * poleBack, -sv * 0.15 * (1 - cAx) + outS * (0.9 * poleBack + (before ? 0.8 * cAx : 0))), P.elbowA);
     solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2 + 0.1 * backB, -1 + 0.6 * backB, sv * 0.3 + outS * 0.9 * backB), P.elbowB);
-    for (const [sh, el, hd] of [[shA, P.elbowA, P.handA], [shB, P.elbowB, P.handB]]) {
-      const fd = tv().subVectors(hd, el).normalize();
-      body.limb(sh, el, tv().copy(hd).addScaledVector(fd, -0.05), tv().copy(hd).addScaledVector(fd, 0.06), ARM_SPEC, ax, firstPerson ? 0.45 : -1);
-    }
+    // в кулаке задней руки удлинитель румпеля, в кулаке передней — шкот от блока
+    const gripB = tv().subVectors(P.handB, c.blockTop).normalize();
+    body.arm(0, shA, P.elbowA, P.handA, toWant, firstPerson, ax);
+    body.arm(1, shB, P.elbowB, P.handB, gripB, firstPerson, ax);
     // удлинитель румпеля направлен на точку хвата, длина постоянная
     res.extTip.copy(pivotHull).addScaledVector(toWant, EXT_LEN);
     // шкот от блока в руку
@@ -322,5 +236,5 @@ export function createSailor(g) {
     res.sheetSag = Math.max(0, Math.min(wantSag, midY - (floorY + 0.05)));
     return res;
   }
-  return { positions: body.positions, colors: body.colors, indices: body.indices, pose: SS, update, setFirstPerson(v) { firstPerson = v; } };
+  return { positions: body.positions, colors: body.colors, indices: body.indices, head: buildHead(), pose: SS, update, setFirstPerson(v) { firstPerson = v; } };
 }
