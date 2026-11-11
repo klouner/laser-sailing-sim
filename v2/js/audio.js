@@ -57,6 +57,15 @@ export function createAudio() {
   }
   // щелчок храповика блока при выборе шкота
   function click() { burst(4200, 0.03, 0.07, 'highpass'); }
+  // судейский гудок: два чуть расстроенных пилообразных тона через фильтр
+  function horn(long = false) {
+    if (!ctx || !enabled) return;
+    const t = ctx.currentTime, dur = long ? 1.5 : 0.6, g = ctx.createGain(), f = ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 1500; f.Q.value = 0.7;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.5, t + 0.03); g.gain.setValueAtTime(0.5, t + dur - 0.08); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    for (const hz of [311, 392]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz; o.connect(f); o.start(t); o.stop(t + dur + 0.05); }
+    f.connect(g); g.connect(master);
+  }
   function splash() { burst(900, 0.9, 0.55); burst(2600, 0.5, 0.2, 'bandpass'); }
 
   // s: { aws — вымпельный ветер, м/с; speed — ход, м/с; luff — 0..1; sheet — текущий угол шкота; slam — волна над носом, м; paused }
@@ -94,5 +103,5 @@ export function createAudio() {
     st.slamWas = s.slam;
   }
   function setEnabled(v) { enabled = v; if (v) start(); }
-  return { start, update, thud, splash, setEnabled, get running() { return !!ctx && ctx.state === 'running'; } };
+  return { start, update, thud, splash, horn, setEnabled, get running() { return !!ctx && ctx.state === 'running'; } };
 }

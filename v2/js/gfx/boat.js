@@ -8,21 +8,19 @@ import { createSailor } from '../model/sailor.js';
 const { MAST_H, RAKE, BOOM_H, BOOM_L, CLEW, LUFF0, HEAD } = RIG;
 
 // ---------- текстуры ----------
-function hullTexture(scene) {
-  const W = 2048, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
+// Наклейка школы на борту: рисуется ровной полосой, на корпус ложится отдельной накладкой
+function stickerTexture(scene, mirror) {
+  const W = 1024, H = 128, c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
-  g.fillStyle = '#f4f6f8'; g.fillRect(0, 0, W, H);
-  // надпись на обоих бортах; на левом она повёрнута, чтобы читалась снаружи
-  const draw = (cx, cy, rot) => {
-    g.save(); g.translate(cx, cy); g.rotate(rot);
-    g.fillStyle = '#101214'; g.textBaseline = 'middle'; g.textAlign = 'center';
-    g.font = 'italic 700 46px Inter, Arial, sans-serif';
-    g.fillText('СИЛА', -150, 0); g.fillText('ВЕТРА', 160, 0);
-    g.font = '800 50px Inter, Arial, sans-serif'; g.fillText('>>>', 0, -2);
-    g.restore();
-  };
-  draw(W * 0.6, H * 0.065, 0); draw(W * 0.6, H * 0.935, Math.PI);
-  const t = new B.DynamicTexture('hullTex', c, scene, true); t.update(true); t.anisotropicFilteringLevel = 8;
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  if (mirror) { g.translate(W, 0); g.scale(-1, 1); }
+  g.textBaseline = 'middle'; g.textAlign = 'left';
+  g.font = '800 84px Inter, Arial, sans-serif'; const w1 = g.measureText('>>>').width;
+  g.font = 'italic 700 78px Inter, Arial, sans-serif'; const w2 = g.measureText('СИЛА ВЕТРА').width;
+  let x = (W - w1 - 36 - w2) / 2;
+  g.font = '800 84px Inter, Arial, sans-serif'; g.fillStyle = '#0047ff'; g.fillText('>>>', x, H / 2 + 2); x += w1 + 36;
+  g.font = 'italic 700 78px Inter, Arial, sans-serif'; g.fillStyle = '#101214'; g.fillText('СИЛА ВЕТРА', x, H / 2 + 4);
+  const t = new B.DynamicTexture('sticker', c, scene, true); t.update(true); t.anisotropicFilteringLevel = 8;
   return t;
 }
 
@@ -45,48 +43,77 @@ const SAIL = (() => {
   }
   return { flat, tackY, headY, clewX, clewY, xmin: clewX - 0.14, w: CLEW + 0.2, ymin: BOOM_H - 0.05, h: headY - BOOM_H + 0.15, luffX };
 })();
-function sailTexture(scene, mirror) {
-  const W = 1024, H = 2048, c = document.createElement('canvas'); c.width = W; c.height = H;
+// Разметка паруса. Швы и латы идут поперёк задней шкаторины, номер и буквы страны стоят вдоль швов.
+// По правилам класса на правой стороне номер и буквы стоят выше, чем на левой, чтобы не накладываться на просвет;
+// последние четыре цифры номера одного цвета, первые другого. Знаки обратной стороны видны сквозь ткань бледными и зеркальными.
+// port — текстура левой стороны паруса: на ней свои знаки нарисованы зеркально, потому что смотрят на неё с изнанки развёртки.
+function sailTexture(scene, port, o = {}) {
+  const res = o.res || 1, num = o.num || '214538', W = 1024 * res, H = 2048 * res, c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
-  const X = (x) => (x - SAIL.xmin) / SAIL.w * W, Y = (y) => (1 - (y - SAIL.ymin) / SAIL.h) * H, px = W / SAIL.w;
-  if (mirror) { g.translate(W, 0); g.scale(-1, 1); }
-  g.fillStyle = '#f3f2ee'; g.fillRect(0, 0, W, H);
+  const px = W / SAIL.w, py = H / SAIL.h;
+  const X = (x) => (x - SAIL.xmin) * px, Y = (y) => (SAIL.ymin + SAIL.h - y) * py;
   const p = { x: 0, y: 0, chord: 0 }, q = { x: 0, y: 0, chord: 0 };
-  // чёрная вставка у топа
-  g.fillStyle = '#0b0c0e'; g.beginPath();
-  for (let i = 0; i <= 20; i++) { SAIL.flat(i / 20, 0.775, p); g.lineTo(X(p.x), Y(p.y)); }
-  for (let j = 0; j <= 10; j++) { SAIL.flat(1, 0.775 + 0.225 * j / 10, p); g.lineTo(X(p.x), Y(p.y)); }
-  for (let j = 10; j >= 0; j--) { SAIL.flat(0, 0.775 + 0.225 * j / 10, p); g.lineTo(X(p.x), Y(p.y)); }
-  g.closePath(); g.fill();
-  // швы полотнищ: идут поперёк задней шкаторины
-  g.strokeStyle = 'rgba(60,66,74,0.34)'; g.lineWidth = 2.2;
-  for (const v of [0.13, 0.27, 0.41, 0.55, 0.68]) { g.beginPath(); SAIL.flat(0, v + 0.035, p); SAIL.flat(1, v, q); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.stroke(); }
-  // латы: три кармана у задней шкаторины
-  g.strokeStyle = 'rgba(40,44,50,0.55)'; g.lineWidth = 7;
-  for (const [v, len] of [[0.30, 0.62], [0.54, 0.62], [0.76, 0.42]]) {
-    SAIL.flat(1, v, p); SAIL.flat(1 - len / Math.max(0.3, p.chord), v + 0.012, q);
-    g.beginPath(); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.stroke();
+  g.fillStyle = '#f3f2ee'; g.fillRect(0, 0, W, H);
+  // направление швов: перпендикуляр к прямой от шкотового угла к фаловому, вперёд и вниз
+  const hx = SAIL.luffX(SAIL.headY) - 0.06, lx = hx - SAIL.clewX, ly = SAIL.headY - SAIL.clewY, ll = Math.hypot(lx, ly);
+  const sx = ly / ll, sy = -lx / ll, ang = Math.atan2(-sy, sx);
+  const leech = (v, out) => SAIL.flat(1, v, out);
+  const along = (v, d, out) => { leech(v, out); out.x += sx * d; out.y += sy * d; return out; };
+  // всё рисуется внутри контура паруса
+  g.save(); g.beginPath();
+  for (let j = 0; j <= 30; j++) { SAIL.flat(0, j / 30, p); g.lineTo(X(p.x), Y(p.y)); }
+  for (let i = 0; i <= 12; i++) { SAIL.flat(i / 12, 1, p); g.lineTo(X(p.x), Y(p.y)); }
+  for (let j = 30; j >= 0; j--) { SAIL.flat(1, j / 30, p); g.lineTo(X(p.x), Y(p.y)); }
+  for (let i = 12; i >= 0; i--) { SAIL.flat(i / 12, 0, p); g.lineTo(X(p.x), Y(p.y)); }
+  g.closePath(); g.clip();
+  // чёрная вставка у топа: выше верхнего шва
+  { along(0.80, -1, p); along(0.80, 3, q); g.fillStyle = '#0b0c0e'; g.beginPath(); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.lineTo(X(q.x), 0); g.lineTo(X(p.x), 0); g.closePath(); g.fill(); }
+  // швы полотнищ
+  g.strokeStyle = 'rgba(60,66,74,0.30)'; g.lineWidth = 2.2;
+  for (const v of [0.10, 0.215, 0.33, 0.445, 0.56, 0.675]) { along(v, -0.2, p); along(v, 3.2, q); g.beginPath(); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.stroke(); }
+  // три латы в карманах у задней шкаторины
+  for (const [v, len] of [[0.25, 0.60], [0.52, 0.60], [0.76, 0.40]]) {
+    along(v, -0.02, p); along(v, len, q);
+    g.strokeStyle = 'rgba(40,44,50,0.5)'; g.lineWidth = 9; g.beginPath(); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.stroke();
+    g.strokeStyle = 'rgba(235,236,238,0.9)'; g.lineWidth = 4; g.beginPath(); g.moveTo(X(p.x), Y(p.y)); g.lineTo(X(q.x), Y(q.y)); g.stroke();
   }
-  // окно
+  // окно у мачты
   g.fillStyle = 'rgba(120,160,200,0.78)'; g.strokeStyle = 'rgba(50,60,72,0.7)'; g.lineWidth = 3;
-  g.beginPath(); g.roundRect(X(-1.32), Y(BOOM_H + 0.86), 0.62 * px, 0.56 * (H / SAIL.h), 10); g.fill(); g.stroke();
+  g.beginPath(); g.roundRect(X(-1.32), Y(BOOM_H + 1.42), 0.62 * px, 0.56 * py, 10); g.fill(); g.stroke();
   // усиления углов
   g.fillStyle = 'rgba(200,203,208,0.9)';
-  for (const [u, v, r] of [[0, 0, 0.3], [1, 0, 0.34], [0.5, 1, 0.26]]) { SAIL.flat(u, v, p); g.beginPath(); g.arc(X(p.x), Y(p.y), r * px, 0, Math.PI * 2); g.fill(); }
-  // надписи: рисуются так, чтобы читались с той стороны, с которой видна эта текстура
-  const text = (str, x, y, size, color, weight = 700, italic = false) => {
-    g.save(); g.translate(X(x), Y(y)); if (mirror) g.scale(-1, 1);
-    g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = `${italic ? 'italic ' : ''}${weight} ${Math.round(size * px)}px Inter, Arial, sans-serif`; g.fillText(str, 0, 0); g.restore();
+  for (const [u, v, r] of [[0, 0, 0.3], [1, 0, 0.34]]) { SAIL.flat(u, v, p); g.beginPath(); g.ellipse(X(p.x), Y(p.y), r * px, r * py, 0, 0, Math.PI * 2); g.fill(); }
+  // строка знаков: центр в точке (x, y) развёртки, высота знака h в метрах, parts — [[текст, цвет], ...]
+  const row = (x, y, h, parts, { rot = 0, flip = false, alpha = 1, font = '700', squeeze = 0.82 } = {}) => {
+    g.save(); g.translate(X(x), Y(y)); g.scale(px / 100, py / 100); g.rotate(rot); if (flip) g.scale(-1, 1); g.scale(squeeze, 1);
+    g.globalAlpha = alpha; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.font = `${font} ${Math.round(h / 0.716 * 100)}px Inter, Arial, sans-serif`;
+    let w = 0; for (const [str] of parts) w += g.measureText(str).width;
+    let x0 = -w / 2;
+    for (const [str, color] of parts) { g.fillStyle = color; g.fillText(str, x0, h * 50); x0 += g.measureText(str).width; }
+    g.restore();
   };
-  text('>>>', -1.18, BOOM_H + 2.62, 0.5, '#0047ff', 800);
-  text('СИЛА ВЕТРА', -1.2, BOOM_H + 2.22, 0.2, '#101214', 700, true);
-  text('RUS 214538', -1.12, BOOM_H + 1.72, 0.2, '#d21f1f', 700);
-  // номер в круге на чёрной вставке
-  SAIL.flat(0.42, 0.865, p);
-  g.strokeStyle = '#f3f2ee'; g.lineWidth = 6; g.beginPath(); g.arc(X(p.x), Y(p.y), 0.15 * px, 0, Math.PI * 2); g.stroke();
-  text('5', p.x, p.y - 0.005, 0.2, '#f3f2ee', 600);
-  const t = new B.DynamicTexture(mirror ? 'sailBack' : 'sailFront', c, scene, true); t.update(true); t.anisotropicFilteringLevel = 8;
+  const BLUE = '#17337f', RED = '#cf1b1b';
+  // правая сторона выше левой; свои знаки яркие, чужие — бледные и зеркальные
+  const rows = [
+    { side: 'S', v: 0.465, d: 0.70, parts: [[num.slice(0, 2), BLUE], [num.slice(2), RED]] },
+    { side: 'P', v: 0.385, d: 0.74, parts: [[num.slice(0, 2), BLUE], [num.slice(2), RED]] },
+    { side: 'S', v: 0.310, d: 0.46, parts: [['RUS', RED]] },
+    { side: 'P', v: 0.195, d: 0.50, parts: [['RUS', RED]] },
+  ];
+  for (const r of rows) {
+    const own = (r.side === 'P') === port;
+    along(r.v, r.d, p);
+    row(p.x, p.y, 0.28, r.parts, { rot: ang, flip: r.side === 'P', alpha: own ? 1 : 0.2, squeeze: 0.76 });
+  }
+  // школа: вдоль нижней шкаторины, наклейки стоят спина к спине
+  row(-1.36, BOOM_H + 0.44, 0.165, [['>>> ', '#0047ff'], ['СИЛА ВЕТРА', '#101214']], { flip: port, font: 'italic 700', squeeze: 0.95 });
+  // номер паруса в прокате: в круге на чёрной вставке
+  SAIL.flat(0.42, 0.89, p);
+  g.strokeStyle = '#f3f2ee'; g.lineWidth = 6; g.beginPath(); g.ellipse(X(p.x), Y(p.y), 0.15 * px, 0.15 * py, 0, 0, Math.PI * 2); g.stroke();
+  row(p.x, p.y, 0.15, [[o.bow || '5', '#f3f2ee']], { flip: port, font: '600', squeeze: 1 });
+  g.restore();
+  const t = new B.DynamicTexture(port ? 'sailPort' : 'sailStbd', c, scene, true); t.update(true); t.anisotropicFilteringLevel = 8;
   return t;
 }
 
@@ -108,8 +135,11 @@ class SinkPlugin extends B.MaterialPluginBase {
   }
 }
 
-export function createBoat(world, env) {
-  const scene = world.scene;
+// opts.player === false — лодка соперника: без отражения, теней и подводного оттенка, с парусом попроще;
+// opts.num — номер на парусе, opts.res — размер текстуры паруса относительно обычного.
+export function createBoat(world, env, opts = {}) {
+  const scene = world.scene, player = opts.player !== false;
+  const reg = player ? world.addBoatMesh : (m) => { m.isPickable = false; };
   // ---- узлы ----
   const root = new B.TransformNode('boat', scene);
   const heelG = new B.TransformNode('heel', scene); heelG.parent = root;       // крен и подъём на волне
@@ -119,7 +149,7 @@ export function createBoat(world, env) {
 
   // ---- материалы ----
   const pbr = (name, rgb, rough, metal = 0) => { const m = new B.PBRMaterial(name, scene); m.albedoColor = new B.Color3(rgb[0], rgb[1], rgb[2]); m.roughness = rough; m.metallic = metal; return m; };
-  const matHull = pbr('hull', [0.86, 0.87, 0.88], 0.24); matHull.albedoTexture = hullTexture(scene);
+  const matHull = pbr('hull', [0.86, 0.87, 0.88], 0.24);
   matHull.clearCoat.isEnabled = true; matHull.clearCoat.intensity = 0.7; matHull.clearCoat.roughness = 0.12;
   const matDeck = pbr('deck', [1, 1, 1], 0.72);
   const matGel = pbr('gel', [0.80, 0.81, 0.82], 0.3);
@@ -129,6 +159,7 @@ export function createBoat(world, env) {
   const matDark = pbr('dark', [0.016, 0.018, 0.022], 0.5);
   const matRubber = pbr('rubber', [0.03, 0.034, 0.04], 0.7);
   const matRope = pbr('rope', [0.82, 0.84, 0.87], 0.92);
+  const matSheet = pbr('sheet', [0.80, 0.50, 0.03], 0.9);       // гика-шкот жёлтый: его видно и на белой палубе, и на парусе
   const matRopeRed = pbr('ropeRed', [0.7, 0.07, 0.07], 0.92);
   const matRopeBlue = pbr('ropeBlue', [0.05, 0.12, 0.55], 0.92);
   const matSleeve = pbr('sleeve', [0.88, 0.88, 0.85], 0.9);
@@ -137,7 +168,7 @@ export function createBoat(world, env) {
   const matGlass = pbr('glass', [0.005, 0.005, 0.006], 0.18, 0.6);
   const matBody = pbr('body', [1, 1, 1], 0.74);
   const matGreen = pbr('ttG', [0.03, 0.55, 0.14], 0.9), matRed = pbr('ttR', [0.85, 0.06, 0.06], 0.9);
-  try { new SinkPlugin(matHull, env); new SinkPlugin(matFoil, env); } catch (e) { console.warn('подводный оттенок отключён:', e.message); }
+  if (player) try { new SinkPlugin(matHull, env); new SinkPlugin(matFoil, env); new SinkPlugin(matBody, env); new SinkPlugin(matSkin, env); } catch (e) { console.warn('подводный оттенок отключён:', e.message); }
 
   // ---- сборка ----
   const statics = [];                                       // неподвижные детали: потом склеиваются по материалам
@@ -153,7 +184,7 @@ export function createBoat(world, env) {
     vd.applyToMesh(m, updatable);
     m.material = mat; m.parent = parent; m.isPickable = false; m.alwaysSelectAsActiveMesh = true;
     if (data.colors) m.useVertexColors = true;
-    world.addBoatMesh(m, { cast, receive, reflect });
+    reg(m, { cast, receive, reflect });
     return m;
   }
   // деталь из стандартной формы; pos и rot в осях родителя
@@ -177,14 +208,28 @@ export function createBoat(world, env) {
   mesh('hull', buildHull(), matHull, hull);
   mesh('deck', buildDeck(), matDeck, hull);
   { const pts = gunwalePath(), tube = makeTube(pts.length, 8, false); tube.set(pts, 0.016); mesh('gunwale', tube, matGel, hull); }
+  // наклейки на бортах: полоса вдоль планширя, повторяет обвод; буквы не тянет, потому что развёртка у накладки своя
+  for (const sgn of [1, -1]) {
+    const x0 = 0.25, x1 = 1.45, d0 = 0.055, d1 = 0.205, NXd = 30, NYd = 4, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= NXd; i++) {
+      const st = stationAtX(x0 + (x1 - x0) * i / NXd);
+      for (let j = 0; j <= NYd; j++) {
+        const d = d0 + (d1 - d0) * j / NYd, cth = Math.pow(d / (st.sheer - st.keel), 1 / st.flat), z = st.hw * Math.sqrt(Math.max(0, 1 - cth * cth));
+        pos.push(st.x, st.sheer - d, sgn * (z + 0.0025)); uv.push(sgn > 0 ? i / NXd : 1 - i / NXd, 1 - j / NYd);
+      }
+    }
+    for (let i = 0; i < NXd; i++) for (let j = 0; j < NYd; j++) { const a = i * (NYd + 1) + j, b2 = a + NYd + 1, c = a + 1, d = b2 + 1; if (sgn > 0) idx.push(a, c, b2, b2, c, d); else idx.push(a, b2, c, b2, d, c); }
+    const m = pbr('sticker' + sgn, [0.86, 0.87, 0.88], 0.3); m.albedoTexture = stickerTexture(scene, false);
+    mesh('sticker', { positions: new Float32Array(pos), uvs: new Float32Array(uv), indices: new Uint32Array(idx) }, m, hull, { cast: false });
+  }
 
   // шверт с колодцем
   const trunkTop = deckAt(TRUNK_X) + 0.06, BOARD_DOWN = trunkTop + 0.02, BOARD_LIFT = 0.5, BOARD_AFT = TRUNK_X - 0.2;
   part(box(0.50, 0.05, 0.075), matDark, hull, [TRUNK_X, deckAt(TRUNK_X) + 0.035, 0]);
   const board = mesh('board', buildFoil(0.40, 0.30, 1.30, 0.03, 0.075), matFoil, hull); board.position.set(TRUNK_X + 0.2, BOARD_DOWN, 0);
   const boardTop = new B.TransformNode('boardTop', scene); boardTop.parent = hull;
-  { const a = box(0.42, 0.04, 0.034); a.material = matFoil; a.parent = boardTop; a.position.y = 0.01; world.addBoatMesh(a);
-    const b = tor(0.05, 0.011); b.material = matRubber; b.parent = boardTop; b.position.y = 0.06; b.rotation.x = Math.PI / 2; world.addBoatMesh(b); }
+  { const a = box(0.42, 0.04, 0.034); a.material = matFoil; a.parent = boardTop; a.position.y = 0.01; reg(a);
+    const b = tor(0.05, 0.011); b.material = matRubber; b.parent = boardTop; b.position.y = 0.06; b.rotation.x = Math.PI / 2; reg(b); }
   const bungee = makeRope(2, 4, 5), bungeePts = [new V3(TRUNK_X, BOARD_DOWN + 0.02, 0), new V3(1.78, deckAt(1.78) + 0.03, 0)];
   const bungeeM = dyn('bungee', bungee, matDark, hull, { cast: false });
 
@@ -218,11 +263,11 @@ export function createBoat(world, env) {
   const SLV_N = 22, sleeve = makeTube(SLV_N, 10), slvPts = []; for (let i = 0; i < SLV_N; i++) slvPts.push(new V3());
   const sleeveM = dyn('sleeve', sleeve, matSleeve, rig);
   const mastTop = new B.TransformNode('mastTop', scene); mastTop.parent = rig;
-  { const cap = cyl(0.034, 0.02, 0.1, 12); cap.material = matDark; cap.parent = mastTop; world.addBoatMesh(cap); }
+  { const cap = cyl(0.034, 0.02, 0.1, 12); cap.material = matDark; cap.parent = mastTop; reg(cap); }
   // флюгарка
   const windex = new B.TransformNode('windex', scene); windex.parent = mastTop; windex.position.y = 0.06;
-  { const add = (m, pos, rot) => { m.material = matRed; m.parent = windex; m.position.set(pos[0], pos[1], pos[2]); if (rot) m.rotation.set(rot[0], rot[1], rot[2]); world.addBoatMesh(m, { receive: false }); };
-    const sh = cyl(0.004, 0.004, 0.3, 6); sh.material = matAlu; sh.parent = mastTop; sh.position.y = 0.2; world.addBoatMesh(sh, { receive: false });
+  { const add = (m, pos, rot) => { m.material = matRed; m.parent = windex; m.position.set(pos[0], pos[1], pos[2]); if (rot) m.rotation.set(rot[0], rot[1], rot[2]); reg(m, { receive: false }); };
+    const sh = cyl(0.004, 0.004, 0.3, 6); sh.material = matAlu; sh.parent = mastTop; sh.position.y = 0.2; reg(sh, { receive: false });
     windex.position.y = 0.35;
     add(box(0.42, 0.012, 0.012), [0.1, 0, 0]); add(cyl(0.03, 0.0, 0.1, 8), [0.35, 0, 0], [0, 0, -Math.PI / 2]); add(box(0.1, 0.07, 0.005), [-0.1, 0, 0]); }
   // гик
@@ -260,8 +305,8 @@ export function createBoat(world, env) {
     m.subSurface.tintColor = new B.Color3(1, 0.98, 0.94);
     return m;
   };
-  const sailA = mesh('sailA', sailData, mkSailMat('sailF', sailTexture(scene, true), true), rig, { updatable: true });
-  const sailB = mesh('sailB', sailData, mkSailMat('sailB', sailTexture(scene, false), false), rig, { updatable: true, cast: false, reflect: false });
+  const sailA = mesh('sailA', sailData, mkSailMat('sailF', sailTexture(scene, false, opts), true), rig, { updatable: true });
+  const sailB = mesh('sailB', sailData, mkSailMat('sailB', sailTexture(scene, true, opts), false), rig, { updatable: true, cast: false, reflect: false });
   // колдунчики: три пары на парусе
   const telltales = [];
   for (const [u, v] of [[0.26, 0.28], [0.28, 0.5], [0.3, 0.7]]) for (const sgn of [-1, 1]) {
@@ -271,12 +316,13 @@ export function createBoat(world, env) {
 
   // ---- шкот, погон ----
   const sheet = makeRope(6, 6, 6), sheetPts = [0, 1, 2, 3, 4, 5].map(() => new V3()), sheetSags = [0, 0, 0, 0, 0];
-  const sheetM = dyn('sheet', sheet, matRope, hull, { cast: false });
+  const sheetM = dyn('sheet', sheet, matSheet, hull, { cast: false });
   const trav = makeRope(4, 3, 5), travPts = [new V3(-1.94, deckAt(-1.94) + 0.012, -0.43), new V3(), new V3(-1.94, deckAt(-1.94) + 0.012, 0.43), new V3(-1.42, deckAt(-1.42) + 0.03, 0)];
   const travM = dyn('trav', trav, matRopeBlue, hull, { cast: false });
-  const travBlock = cyl(0.026, 0.026, 0.022, 12); travBlock.material = matDark; travBlock.parent = hull; travBlock.rotation.x = Math.PI / 2; world.addBoatMesh(travBlock);
-  const handSheet = makeRope(2, 6, 5), handPts = [new V3(), new V3()];
-  const handM = dyn('handSheet', handSheet, matRope, hull, { cast: false });
+  const travBlock = cyl(0.026, 0.026, 0.022, 12); travBlock.material = matDark; travBlock.parent = hull; travBlock.rotation.x = Math.PI / 2; reg(travBlock);
+  // шкот от блока в руку и ходовой конец, который лежит на дне кокпита
+  const handSheet = makeRope(5, 5, 5), handPts = [new V3(), new V3(), new V3(), new V3(), new V3()], handSags = [0, 0, 0, 0];
+  const handM = dyn('handSheet', handSheet, matSheet, hull, { cast: false });
 
   // ---- руль ----
   const transomY = deckAt(HULL.xStern);
@@ -293,8 +339,9 @@ export function createBoat(world, env) {
   const sailorG = new B.TransformNode('sailor', scene); sailorG.parent = hull;
   const sailor = createSailor({ deckAt, cockpitHalfWidth, cockpitSDF, COCKPIT, FLOOR_Y });
   const bodyM = mesh('body', sailor, matBody, sailorG, { updatable: true }), bodyNrm = new Float32Array(sailor.positions.length);
-  const headG = new B.TransformNode('head', scene); headG.parent = sailorG;
-  { const add = (m, mat, pos, scale, rot) => { m.material = mat; m.parent = headG; m.position.set(pos[0], pos[1], pos[2]); if (scale) m.scaling.set(scale[0], scale[1], scale[2]); if (rot) m.rotation.set(rot[0], rot[1], rot[2]); m.isPickable = false; world.addBoatMesh(m); return m; };
+  const headRoll = new B.TransformNode('headRoll', scene); headRoll.parent = sailorG;     // держит голову прямо, когда лодка лежит на борту
+  const headG = new B.TransformNode('head', scene); headG.parent = headRoll;
+  { const add = (m, mat, pos, scale, rot) => { m.material = mat; m.parent = headG; m.position.set(pos[0], pos[1], pos[2]); if (scale) m.scaling.set(scale[0], scale[1], scale[2]); if (rot) m.rotation.set(rot[0], rot[1], rot[2]); m.isPickable = false; reg(m); return m; };
     add(sph(0.102, 18), matSkin, [0, 0, 0], [1, 1.1, 0.94]);
     add(sph(0.02, 8), matSkin, [0.1, -0.012, 0]);
     for (const s of [-1, 1]) add(sph(0.022, 8), matSkin, [0, 0, s * 0.097]);
@@ -310,13 +357,13 @@ export function createBoat(world, env) {
       for (const m of list) m.computeWorldMatrix(true);
       const merged = list.length > 1 ? B.Mesh.MergeMeshes(list, true, true) : list[0];
       merged.material = mat; merged.setParent(parent); merged.isPickable = false; merged.alwaysSelectAsActiveMesh = true;
-      world.addBoatMesh(merged);
+      reg(merged);
     } }
 
   // ---------- обновление ----------
   const sea = { heave: 0, sf: 0, ss: 0 };
   const sheetState = { slack: 0, ease: 0 };
-  let flutter = 0, mastBend = 0, boardUp = 0, sailorOn = true, firstPerson = false;
+  let flutter = 0, mastBend = 0, boardUp = 0, sailorOn = true, firstPerson = false, leeFlow = 1;
   const bendAt = (v) => mastBend * v * v;
   const tmp = new V3(), tmp2 = new V3(), pivotHull = new V3(), ctx = { boomRot: 0, mastBase, BOOM_H, BOOM_L, boardUp: 0, boardAft: BOARD_AFT, pivotHull, blockTop, boomBlockMid, extLen: EXT_LEN, ease: 0, slack: 0 };
   const api = { holdPose: false, pose: sailor.pose, root, heelG, hull, rig, sea, MAST_H, BOOM_H };
@@ -364,15 +411,16 @@ export function createBoat(world, env) {
     sleeve.set(slvPts, (i) => 0.047 - 0.017 * i / (SLV_N - 1)); sleeveM.upload();
     mastTop.position.set(-RAKE - mastBend, MAST_H, 0);
     // колдунчики: наветренный дёргается вверх при малом угле атаки, подветренный обвисает при срыве
+    leeFlow += (((out.byLee || 0) > 5 ? -1 : 1) - leeFlow) * Math.min(1, dt * 4);
     for (const t of telltales) {
       const i = Math.round(t.u * NU), j = Math.round(t.v * NV), k = (i * (NV + 1) + j) * 3;
       const base = t.pts[0].set(sailPos[k], sailPos[k + 1], sailPos[k + 2] + t.sgn * 0.02);
       const windward = t.sgn === Math.sign(side || 1);
       const stream = windward ? (aoa >= 8 && !out.luffing ? 1 : 0) : (aoa <= 26 && !out.luffing ? 1 : 0);
-      const wig = Math.sin(flutter * 2.2 + t.phase), len = 0.26;
+      const wig = Math.sin(flutter * 2.2 + t.phase), len = 0.26, lx = len * leeFlow;
       const lift = windward ? (1 - stream) * (0.6 + 0.4 * wig) : 0, droop = !windward ? (1 - stream) * (0.5 + 0.3 * wig) : 0;
-      t.pts[1].set(base.x - len * 0.5, base.y + len * 0.5 * (lift - droop) + 0.02 * wig * stream, base.z + t.sgn * 0.02 * stream * wig);
-      t.pts[2].set(base.x - len * (0.3 + 0.7 * stream), base.y + len * (lift * 0.9 - droop * 0.9) + 0.03 * wig * stream, base.z + t.sgn * 0.04 * stream * Math.sin(flutter * 2.2 + t.phase + 1));
+      t.pts[1].set(base.x - lx * 0.5, base.y + len * 0.5 * (lift - droop) + 0.02 * wig * stream, base.z + t.sgn * 0.02 * stream * wig);
+      t.pts[2].set(base.x - lx * (0.3 + 0.7 * stream), base.y + len * (lift * 0.9 - droop * 0.9) + 0.03 * wig * stream, base.z + t.sgn * 0.04 * stream * Math.sin(flutter * 2.2 + t.phase + 1));
       t.r.set(t.pts, null, 0.004); t.m.upload();
     }
   }
@@ -387,8 +435,8 @@ export function createBoat(world, env) {
     const kk = Math.min(1, dt * 7);
     sea.heave += ((hB + hS + hR + hL + 2 * hC) / 6 - sea.heave) * kk;
     sea.sf += ((hB - hS) / 3.4 - sea.sf) * kk; sea.ss += ((hR - hL) / 1.0 - sea.ss) * kk;
-    env.setBoatPlane(fx, fz, sea.heave, sea.sf, sea.ss, 1);
-    env.setBoatWash(out.capsized ? 0 : clamp((Math.abs(state.vf) - 0.4) / 3.2, 0, 1));
+    if (player) env.setBoatPlane(fx, fz, sea.heave, sea.sf, sea.ss, 1);
+    if (player) env.setBoatWash(out.capsized ? 0 : clamp((Math.abs(state.vf) - 0.4) / 3.2, 0, 1));
     heelG.rotation.x = -state.heel * DEG - Math.atan(sea.ss) * 0.55;
     hull.rotation.z = Math.atan(sea.sf) - Math.min(2.5, state.vf * 0.9) * DEG;         // на ходу лёгкий дифферент на корму
     heelG.position.y = sea.heave;
@@ -415,7 +463,7 @@ export function createBoat(world, env) {
     sheetPts[4].copy(boomBlockMid).rotY(rot).add(mastBase);
     sheetPts[5].copy(blockTop);
     sheetSags[0] = sheetSags[1] = 0.01 + 0.14 * sl; sheetSags[2] = 0.02 + 0.16 * sl; sheetSags[3] = 0.02 + 0.22 * sl; sheetSags[4] = 0;
-    sheet.set(sheetPts, sheetSags, 0.0075); sheetM.upload();
+    sheet.set(sheetPts, sheetSags, 0.0085); sheetM.upload();
 
     rudderPivot.rotation.y = state.rudder * DEG;
     boardUp = (1 - state.board) * BOARD_LIFT;
@@ -423,19 +471,24 @@ export function createBoat(world, env) {
     bungeePts[0].y = BOARD_DOWN + 0.02 + boardUp; bungee.set(bungeePts, null, 0.005); bungeeM.upload();
 
     // матрос
-    const show = sailorOn && !out.capsized;
-    bodyM.setEnabled(show); headG.setEnabled(show && !firstPerson); handM.mesh.setEnabled(show); extM.mesh.setEnabled(true);
+    const show = sailorOn, lying = !!out.capsized && Math.abs(state.heel) > 42;
+    bodyM.setEnabled(show); headG.setEnabled(show && !firstPerson); handM.mesh.setEnabled(show && !lying); extM.mesh.setEnabled(true);
     pivotHull.copy(TILLER_END).rotY(state.rudder * DEG); pivotHull.x += HULL.xStern - 0.035; pivotHull.y += transomY;
     let tip = tmp.set(pivotHull.x + EXT_LEN * 0.6, pivotHull.y + 0.02, pivotHull.z);
     if (show) {
-      ctx.boomRot = rot; ctx.boardUp = boardUp; ctx.ease = sheetState.ease; ctx.slack = sheetState.slack;
+      ctx.boomRot = rot; ctx.boardUp = boardUp; ctx.ease = sheetState.ease; ctx.slack = sheetState.slack; ctx.swim = !!ctl.swimBow && lying && !state.righting;
       const r = sailor.update(state, api.holdPose ? 0 : dt, out, ctx);
       bodyM.updateVerticesData(B.VertexBuffer.PositionKind, sailor.positions, false, false);
       bodyM.updateVerticesData(B.VertexBuffer.ColorKind, sailor.colors, false, false);
       bodyM.updateVerticesData(B.VertexBuffer.NormalKind, computeNormals(sailor.positions, sailor.indices, bodyNrm), false, false);
-      headG.position.set(r.head.x, r.head.y, r.head.z); headG.rotation.set(0, r.headYaw, r.headTilt);
+      headRoll.position.set(r.head.x, r.head.y, r.head.z); headRoll.rotation.x = r.headRoll; headG.rotation.set(0, r.headYaw, r.headTilt);
       tip = r.extTip;
-      handPts[0].copy(blockTop); handPts[1].copy(r.sheetEnd); handSheet.set(handPts, [r.sheetSag], 0.008); handM.upload();
+      const he = r.sheetEnd, hw = cockpitHalfWidth(he.x) - 0.12, fy = FLOOR_Y + 0.016;
+      const tx = clamp(he.x - 0.12, COCKPIT.xBack + 0.3, COCKPIT.xFront - 0.25), tz = clamp(he.z * 0.55, -hw, hw);
+      handPts[0].copy(blockTop); handPts[1].copy(he);
+      handPts[2].set(tx, fy, tz); handPts[3].set(tx - 0.2, fy, tz * 0.4 - 0.07); handPts[4].set(tx - 0.05, fy, tz * 0.2 + 0.1);
+      handSags[0] = r.sheetSag; handSags[1] = -0.05;
+      handSheet.set(handPts, handSags, 0.009); handM.upload();
     }
     // удлинитель румпеля: от конца румпеля к руке, ближе к руке утолщение рукоятки
     extPts[0].copy(pivotHull); extPts[3].copy(tip); extPts[1].copy(pivotHull).lerp(tip, 0.78); extPts[2].copy(pivotHull).lerp(tip, 0.8);
@@ -447,7 +500,7 @@ export function createBoat(world, env) {
   api.setSailor = (v) => { sailorOn = v; };
   api.setHead = (v) => { firstPerson = !v; sailor.setFirstPerson(!v); };
   // положение глаз матроса в осях лодки и перевод из осей лодки в мир
-  api.eyeLocal = (v) => v.copyFrom(headG.position);
+  api.eyeLocal = (v) => v.copyFrom(headRoll.position);
   api.toWorld = (v, out) => B.Vector3.TransformCoordinatesToRef(v, hull.computeWorldMatrix(true), out);
   api.deckY = () => mastBase.y;
   return api;

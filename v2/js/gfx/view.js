@@ -23,7 +23,7 @@ export function createCameraRig(world, canvas, boat) {
     if (cockpit) { rig.look.yaw = 0; rig.look.pitch = -0.1; return; }
     if (mode === 'free' && was !== 'cockpit') { rig.lastHeading = heading; return; }
     const m = mode === 'free' ? 'chase' : mode;
-    if (m === 'chase') setOffset(fx * -12.5 + sx * -4.6 * side, 3.6, fz * -12.5 + sz * -4.6 * side);
+    if (m === 'chase') setOffset(fx * -9.6 + sx * -4.4 * side, 2.2, fz * -9.6 + sz * -4.4 * side);
     else if (m === 'top') setOffset(0.02, 21, 0.03);
     else if (m === 'side') setOffset(sx * -14.5 * side + fx * -1, 1.4, sz * -14.5 * side + fz * -1);
     rig.lastHeading = heading;
@@ -47,7 +47,7 @@ export function createCameraRig(world, canvas, boat) {
       orb.az += dh; orb.azT += dh;
     }
     rig.lastHeading = st.heading;
-    const k = 1 - Math.exp(-dt * 12);
+    const k = 1 - Math.exp(-dt * (rig.introT > 0 ? 0.85 : 12)); if (rig.introT > 0) rig.introT -= dt;
     orb.az += (orb.azT - orb.az) * k; orb.el += (orb.elT - orb.el) * k; orb.dist += (orb.distT - orb.dist) * k;
     // свободное место на экране бывает выше центра (на телефоне снизу управление): цель сдвигается, чтобы лодка была в нём
     const shift = rig.screenShift * 2 * Math.tan(cam.fov / 2) * orb.dist;
@@ -56,12 +56,14 @@ export function createCameraRig(world, canvas, boat) {
     cam.position.set(st.x + orb.dist * ce * Math.cos(orb.az), rig.targetY - shift + orb.dist * Math.sin(orb.el), st.z + orb.dist * ce * Math.sin(orb.az));
     cam.upVector.set(0, 1, 0); cam.setTarget(tgt);
   };
+  // Заставка: камера начинает издалека, низко над водой, и за несколько секунд облетает лодку до обычного места
+  rig.intro = () => { orb.az = orb.azT + 2.3; orb.el = 0.05; orb.dist = orb.distT * 2.3; rig.introT = 6; };
   // положение камеры относительно лодки напрямую (для проверок)
-  rig.place = (dx, dy, dz, ty = rig.targetY) => { rig.mode = 'free'; rig.targetY = ty; setOffset(dx, dy - ty, dz); };
+  rig.place = (dx, dy, dz, ty = rig.targetY) => { rig.introT = 0; rig.mode = 'free'; rig.targetY = ty; setOffset(dx, dy - ty, dz); };
 
   // управление: один палец или мышь вращают, колесо и щипок приближают; из кокпита перетаскивание поворачивает взгляд
   const ptrs = new Map(); let pinch = 0;
-  canvas.addEventListener('pointerdown', (e) => { if (!rig.enabled) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { canvas.setPointerCapture(e.pointerId); } catch (er) {} pinch = 0; });
+  canvas.addEventListener('pointerdown', (e) => { if (!rig.enabled) return; rig.introT = 0; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { canvas.setPointerCapture(e.pointerId); } catch (er) {} pinch = 0; });
   canvas.addEventListener('pointermove', (e) => {
     const p = ptrs.get(e.pointerId); if (!p) return;
     const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
@@ -156,6 +158,75 @@ export function makeMark(world, rgb) {
   const beam = B.CreateCylinder('beam', { diameterBottom: 2.4, diameterTop: 1.2, height: 14, tessellation: 24, cap: B.Mesh.NO_CAP }, scene);
   beam.material = beamMat; beam.parent = bob; beam.position.y = 7; beam.isPickable = false;
   return { node, bob, flagG, beam, setEnabled: (v) => node.setEnabled(v) };
+}
+
+// ---------- судейский катер с сигнальными флагами ----------
+function flagTexture(scene, kind) {
+  const c = document.createElement('canvas'); c.width = 192; c.height = 128; const g = c.getContext('2d');
+  if (kind === 'P') { g.fillStyle = '#0a3ea8'; g.fillRect(0, 0, 192, 128); g.fillStyle = '#fff'; g.fillRect(58, 38, 76, 52); }
+  else if (kind === 'X') { g.fillStyle = '#fff'; g.fillRect(0, 0, 192, 128); g.fillStyle = '#0a3ea8'; g.fillRect(76, 0, 40, 128); g.fillRect(0, 44, 192, 40); }
+  else if (kind === 'line') { g.fillStyle = '#ff5a00'; g.fillRect(0, 0, 192, 128); }
+  else {                                              // флаг класса: красный знак лазера на белом
+    g.fillStyle = '#fff'; g.fillRect(0, 0, 192, 128); g.strokeStyle = '#d21f1f'; g.lineWidth = 7; g.lineCap = 'round';
+    for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.beginPath(); g.moveTo(96 + Math.cos(a) * 12, 64 + Math.sin(a) * 12); g.lineTo(96 + Math.cos(a) * (i % 2 ? 34 : 46), 64 + Math.sin(a) * (i % 2 ? 34 : 46)); g.stroke(); }
+  }
+  const t = new B.DynamicTexture('flag' + kind, c, scene, true); t.update(true); return t;
+}
+export function makeCommittee(world) {
+  const scene = world.scene, node = new B.TransformNode('rc', scene), bob = new B.TransformNode('rcBob', scene); bob.parent = node;
+  const pbr = (name, rgb, rough) => { const m = new B.PBRMaterial(name, scene); m.albedoColor = new B.Color3(rgb[0], rgb[1], rgb[2]); m.roughness = rough; m.metallic = 0; return m; };
+  const navy = pbr('rcHull', [0.02, 0.05, 0.13], 0.35), white = pbr('rcWhite', [0.8, 0.81, 0.82], 0.5), glass = pbr('rcGlass', [0.02, 0.03, 0.04], 0.15), wood = pbr('rcDeck', [0.42, 0.3, 0.2], 0.8), red = pbr('rcRed', [0.5, 0.03, 0.02], 0.6);
+  const reg = (m, mat, parent = bob) => { m.material = mat; m.parent = parent; m.isPickable = false; world.addBoatMesh(m, { cast: true, receive: true, reflect: true }); return m; };
+  // корпус: обводы по шпангоутам, нос на +x
+  { const L = 7.6, NXh = 26, NT = 14, pos = [], idx = [], row = NT + 1;
+    for (let i = 0; i <= NXh; i++) {
+      const u = i / NXh, x = -L / 2 + L * u, hw = 1.3 * Math.pow(Math.max(0, 1 - Math.pow(u, 2.6)), 0.75) * (0.86 + 0.14 * Math.min(1, u * 4)), sheer = 0.95 + 0.4 * u * u, keel = -0.45 + 0.5 * Math.pow(u, 5);
+      for (let j = 0; j <= NT; j++) { const t = -1 + 2 * j / NT, a = Math.abs(t); pos.push(x, sheer - (sheer - keel) * Math.pow(1 - a, 1.5), hw * Math.sign(t) * Math.pow(a, 0.62)); }
+    }
+    for (let i = 0; i < NXh; i++) for (let j = 0; j < NT; j++) { const a = i * row + j, b = a + 1, c = a + row, d = c + 1; idx.push(a, b, c, b, d, c); }
+    const base = pos.length / 3;                       // палуба и транец
+    for (let i = 0; i <= NXh; i++) { const k = i * row * 3; pos.push(pos[k], pos[k + 1], pos[k + 2], pos[k + NT * 3], pos[k + NT * 3 + 1], pos[k + NT * 3 + 2]); }
+    for (let i = 0; i < NXh; i++) { const a = base + i * 2, b = a + 1, c = a + 2, d = a + 3; idx.push(a, c, b, b, c, d); }
+    const tb0 = pos.length / 3; for (let j = 0; j <= NT; j++) pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]); pos.push(-L / 2, 0.6, 0);
+    for (let j = 0; j < NT; j++) idx.push(tb0 + NT + 1, tb0 + j + 1, tb0 + j);
+    const m = new B.Mesh('rcHull', scene), vd = new B.VertexData(); vd.positions = pos; vd.indices = idx; vd.normals = []; B.VertexData.ComputeNormals(pos, idx, vd.normals); vd.applyToMesh(m);
+    navy.backFaceCulling = false; navy.twoSidedLighting = true; reg(m, navy); }
+  const box = (w, h, d, mat, x, y, z = 0) => { const m = reg(B.CreateBox('b', { width: w, height: h, depth: d }, scene), mat); m.position.set(x, y, z); return m; };
+  const cyl = (d, h, mat, x, y, z = 0) => { const m = reg(B.CreateCylinder('c', { diameter: d, height: h, tessellation: 10 }, scene), mat); m.position.set(x, y, z); return m; };
+  box(7.0, 0.05, 2.1, wood, -0.3, 1.0);                             // настил
+  box(2.6, 1.25, 1.9, white, -0.5, 1.62); box(2.66, 0.42, 1.96, glass, -0.5, 1.86); box(3.0, 0.08, 2.2, white, -0.5, 2.28);   // рубка, остекление, крыша
+  box(0.5, 0.12, 2.5, red, -3.6, 0.82);                              // привальный брус кормы
+  for (const z of [-1, 1]) for (const x of [-3.2, -1.9, 1.0, 2.2]) cyl(0.035, 0.75, white, x, 1.4, z * (x > 1.5 ? 0.85 : 1.15));
+  // мачта с реем: на нём поднимают сигналы; оранжевый флаг на мачте задаёт конец линии
+  const mastX = 1.0;
+  cyl(0.07, 5.2, white, mastX, 3.6); const yard = cyl(0.045, 2.8, white, mastX, 5.3); yard.rotation.x = Math.PI / 2;
+  const mkFlag = (kind, w, h) => {
+    const g = new B.TransformNode('fl' + kind, scene); g.parent = bob;
+    const mat = new B.PBRMaterial('fm' + kind, scene); mat.albedoTexture = flagTexture(scene, kind); mat.roughness = 0.9; mat.metallic = 0; mat.backFaceCulling = false; mat.twoSidedLighting = true;
+    // полотнище из полос: волна идёт от древка к свободному краю
+    const N = 10, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= N; i++) { pos.push(-w * i / N, h / 2, 0, -w * i / N, -h / 2, 0); uv.push(i / N, 1, i / N, 0); }
+    for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    const m = new B.Mesh('flag', scene), vd = new B.VertexData(); vd.positions = pos; vd.indices = idx; vd.uvs = uv; vd.normals = []; B.VertexData.ComputeNormals(pos, idx, vd.normals); vd.applyToMesh(m, true);
+    m.material = mat; m.parent = g; m.isPickable = false; world.addBoatMesh(m, { cast: false, receive: false, reflect: true });
+    return { g, m, pos: new Float32Array(pos), w, N, up: 0 };
+  };
+  const F = { line: mkFlag('line', 1.0, 0.7), cls: mkFlag('cls', 1.1, 0.75), P: mkFlag('P', 1.1, 0.75), X: mkFlag('X', 1.1, 0.75) };
+  F.line.g.position.set(mastX, 6.0, 0); F.cls.g.position.set(mastX, 4.4, -1.25); F.P.g.position.set(mastX, 4.4, 1.25); F.X.g.position.set(mastX, 4.4, 0.45);
+  F.line.up = 1;
+  // флаги смотрят по ветру, поднимаются и спускаются по фалу, полощут
+  function setFlags(fl, t, windFrom) {
+    const yawW = Math.PI / 2 - (windFrom + 180) * Math.PI / 180 - node.rotation.y;      // куда дует, в осях катера
+    for (const k of ['line', 'cls', 'P', 'X']) {
+      const f = F[k], want = k === 'line' ? 1 : fl[k] ? 1 : 0;
+      f.up += (want - f.up) * 0.08; f.g.setEnabled(f.up > 0.02);
+      if (k !== 'line') f.g.position.y = 2.5 + 2.3 * f.up;
+      f.g.rotation.y = yawW + Math.PI;
+      for (let i = 0; i <= f.N; i++) { const u = i / f.N, z = 0.09 * u * Math.sin(t * 9 - u * 7 + k.length) + 0.05 * u * Math.sin(t * 5.3 + u * 4); f.pos[i * 6 + 2] = z; f.pos[i * 6 + 5] = z; }
+      f.m.updateVerticesData(B.VertexBuffer.PositionKind, f.pos, false, false);
+    }
+  }
+  return { node, bob, setFlags, waveL: 7, setEnabled: (v) => node.setEnabled(v) };
 }
 
 // ---------- брызги из-под носа ----------

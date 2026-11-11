@@ -121,11 +121,66 @@ export function createSailor(g) {
   const tv = () => (pool[pi] || (pool[pi] = new V3()), pool[pi++]);
   const Yax = new V3(0, 1, 0);
   // результат кадра: куда поставить голову, куда смотрит удлинитель румпеля, где конец шкота в руке
-  const res = { head: new V3(), headYaw: 0, headTilt: 0, extTip: new V3(), sheetEnd: new V3(), sheetSag: 0 };
+  const res = { head: new V3(), headYaw: 0, headTilt: 0, headRoll: 0, extTip: new V3(), sheetEnd: new V3(), sheetSag: 0, inWater: false };
   let firstPerson = false;
 
   // c: { boomRot (рад), mastBase, BOOM_H, BOOM_L, boardUp, boardAft, pivotHull, blockTop, boomBlockMid (в осях гика), extLen, ease, slack }
+  // Лодка лежит на борту. Сначала матрос в воде у шверта, затем стоит на шверте и держится за борт;
+  // если лодку надо развернуть, плывёт у носа и тянет его к ветру. Всё считается в осях лежащей лодки.
+  function capsizePose(state, c) {
+    pi = 0;
+    const h = state.heel * DEG, cs = Math.sign(state.heel) || 1;
+    const up = tv().set(0, Math.cos(h), Math.sin(h));                 // где в осях лодки мировой верх
+    const side = tv().set(0, -Math.sin(h), Math.cos(h));              // горизонталь поперёк лодки
+    const swim = c.swim || (state.capsized < 1.6 && !state.righting);
+    const hip = P.hip, dir = P.tmp, ax = P.ax;
+    const hands = [P.handA, P.handB], feet = [tv(), tv()], pole = tv();
+    body.begin();
+    if (swim) {
+      const bow = !!c.swim, ax0 = bow ? 2.5 : 0.25;
+      hip.set(ax0, 0, 0).addScaledVector(up, -0.56).addScaledVector(side, bow ? 0 : -cs * 0.75);
+      dir.copy(up); dir.x += bow ? -0.3 : 0; dir.addScaledVector(side, bow ? 0 : cs * 0.25); dir.normalize();
+      if (bow) ax.copy(side); else ax.set(1, 0, 0);
+      for (let i = 0; i < 2; i++) {
+        const o = i ? 0.14 : -0.14;
+        if (bow) hands[i].set(2.1, 0.47, 0).addScaledVector(side, o); else hands[i].set(0.45 + o, -0.25, 0).addScaledVector(up, 0.03);
+        feet[i].copy(hip).addScaledVector(up, -0.8); feet[i].x += bow ? 0.25 + o : o * 1.6;
+      }
+      pole.set(bow ? 1 : 0, 0, 0).addScaledVector(side, bow ? 0 : -cs);
+      res.headYaw = bow ? Math.PI : cs * Math.PI / 2;
+    } else {
+      // на шверте: ноги у самого днища, корпус навален на борт; когда лодка пошла, матрос откидывается назад
+      const k = state.righting ? smoothstep(state.righting, 0.1, 1.2) : 0;
+      hip.set(0.45, -0.46 - 0.25 * k, cs * 0.86);
+      dir.set(0, 0.8 - 0.75 * k, cs * (0.6 + 0.35 * k)).normalize();
+      ax.set(1, 0, 0);
+      for (let i = 0; i < 2; i++) { const o = i ? 0.17 : -0.17; hands[i].set(0.45 + o, 0.33, cs * 0.69); feet[i].set(0.42 + o * 0.9, -0.34, cs * 0.03); }
+      pole.set(0, -1, cs * 0.2);
+      res.headYaw = cs * Math.PI / 2;
+    }
+    P.shoulder.copy(hip).addScaledVector(dir, 0.46);
+    const neck = P.neck.copy(dir).lerp(up, 0.7).normalize();
+    body.torso(hip, dir, ax, false, neck);
+    res.head.copy(hip).addScaledVector(dir, NECK_T).addScaledVector(neck, 0.655 - NECK_T);
+    res.headTilt = 0.05; res.headRoll = h; res.inWater = swim;
+    for (let i = 0; i < 2; i++) {
+      const o = i ? 0.165 : -0.165, sh = tv().copy(P.shoulder).addScaledVector(ax, o), hj = tv().copy(hip).addScaledVector(ax, o * 0.6);
+      clampReach(sh, hands[i], ARM1 + ARM2 - 0.02); clampReach(hj, feet[i], THIGH + SHIN - 0.02);
+      const el = solveElbow(sh, hands[i], ARM1, ARM2, tv().copy(up).multiplyScalar(-1), i ? P.elbowB : P.elbowA);
+      const fd = tv().subVectors(hands[i], el).normalize();
+      body.limb(sh, el, tv().copy(hands[i]).addScaledVector(fd, -0.05), tv().copy(hands[i]).addScaledVector(fd, 0.06), ARM_SPEC, ax);
+      solveElbow(hj, feet[i], THIGH, SHIN, pole, P.knee);
+      body.limb(hj, P.knee, feet[i], tv().copy(feet[i]).addScaledVector(pole, 0.19), LEG_SPEC, pole);
+    }
+    // после подъёма матрос оказывается на том борту, через который влез
+    SS.sgn = cs; SS.y = cs * 0.5; SS.crouch = 0; SS.swap = 1; SS.flip = 0; SS.duck = 0; SS.theta = 0.3;
+    res.extTip.copy(c.pivotHull); res.extTip.x += c.extLen * 0.7; res.sheetEnd.copy(c.blockTop);
+    return res;
+  }
+
   function update(state, dt, out, c) {
+    if (state.capsized > 0 && Math.abs(state.heel) > 42) return capsizePose(state, c);
+    res.headRoll = 0; res.inWater = false;
     pi = 0;
     const k = Math.min(1, dt * 3);
     const twa = out ? out.twaAbs : 90, spd = state.vf;
@@ -250,6 +305,8 @@ export function createSailor(g) {
       P.handB.copy(grip).lerp(sheetN, sm(0.34, 0.58, sw));
     }
     clampReach(shA, P.handA, REACH); clampReach(shB, P.handB, REACH);
+    // Шкот всегда в руке: до перехвата его держит задняя рука, она же берёт удлинитель; затем шкот забирает передняя
+    if (before || sw >= 1) sheetEnd.copy(P.handB); else sheetEnd.copy(P.handA).lerp(P.handB, sm(0.30, 0.40, sw));
     // локти: обычно вниз; у руки, заведённой за спину, — наружу
     const backB = before ? 0 : (sw < 1 ? 1 - sm(0.34, 0.6, sw) : 0), outS = cAx > 0.5 ? SS.sgn : sv;
     solveElbow(shA, P.handA, ARM1, ARM2, tv().set(-1 + 0.5 * poleBack, -0.6 + 0.3 * poleBack, -sv * 0.15 * (1 - cAx) + outS * (0.9 * poleBack + (before ? 0.8 * cAx : 0))), P.elbowA);
@@ -261,7 +318,6 @@ export function createSailor(g) {
     // удлинитель румпеля направлен на точку хвата, длина постоянная
     res.extTip.copy(pivotHull).addScaledVector(toWant, EXT_LEN);
     // шкот от блока в руку
-    sheetEnd.y -= 0.03;
     const midY = (c.blockTop.y + sheetEnd.y) / 2, wantSag = run ? 0.02 : 0.03 + 0.1 * c.ease + 0.12 * c.slack;
     res.sheetSag = Math.max(0, Math.min(wantSag, midY - (floorY + 0.05)));
     return res;

@@ -132,14 +132,14 @@ export const LESSONS = [
   },
   {
     id: 'start', group: 'Мастерство', title: 'Старт по сигналу',
-    goal: 'До сигнала 30 секунд. Стартовая линия — между синими буями, пересекать её надо против ветра. Рассчитай подход: пересеки линию в первые 5 секунд после сигнала и на ходу, не меньше 3 узлов. Раньше сигнала нельзя: это фальстарт. Время тянут, потравив шкот.',
+    goal: 'До сигнала 30 секунд. Стартовая линия идёт от оранжевого знака к мачте судейского катера, пересекать её надо против ветра. Рассчитай подход: пересеки линию в первые 5 секунд после сигнала и на ходу, не меньше 3 узлов. Раньше сигнала нельзя: это фальстарт. Время тянут, потравив шкот.',
     usesCourse: 'W',
     setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 10; state.x = 22; state.z = 24; state.heading = 315; state.vf = 2; ctl.sheet = 18; state.side = 1; },
     check(out, state, el, mem, course) {
       const T = 30, g1 = course.marks.G1, g2 = course.marks.G2, xMin = Math.min(g1.x, g2.x), xMax = Math.max(g1.x, g2.x), zLine = g1.z;
       const z = state.z - zLine, was = mem.z === undefined ? z : mem.z; mem.z = z;
       if (was > 0 && z <= 0) {                                   // пересёк линию с подветренной стороны
-        if (state.x < xMin - 0.5 || state.x > xMax + 0.5) return { fail: 'Прошёл мимо линии: она между синими буями. Ещё раз!' };
+        if (state.x < xMin - 0.5 || state.x > xMax + 0.5) return { fail: 'Прошёл мимо линии: она между знаком и катером. Ещё раз!' };
         if (el < T) return { fail: `Фальстарт: линия пересечена за ${(T - el).toFixed(1)} с до сигнала. Время тянут у линии: потрави шкот и стой, добирай за несколько секунд до сигнала.` };
         if (el > T + 5) return { fail: `Опоздал на ${(el - T).toFixed(1)} с. Держись ближе к линии и начинай разгон заранее.` };
         if (out.speedKn < 3) return { fail: `Линию пересёк вовремя, но без хода: ${out.speedKn.toFixed(1)} уз. Разгон начинают за 5–7 секунд до сигнала.` };
@@ -149,6 +149,56 @@ export const LESSONS = [
       const note = el < T ? `До сигнала ${Math.ceil(T - el)} с · до линии ${Math.max(0, Math.round(z))} м · ход ${out.speedKn.toFixed(1)} уз` : `СТАРТ! Пересекай линию · прошло ${(el - T).toFixed(1)} с`;
       return { progress: 0.85 * clamp01(el / T), note };
     },
+  },
+  {
+    id: 'rolltack', group: 'Мастерство', title: 'Поворот с перекатом',
+    goal: 'Слабый ветер, 7 узлов: обычный оверштаг съедает ход. Гонщики делают перекат: пока нос идёт к ветру, матрос остаётся на старом борту и валит лодку на себя, а на новом галсе переходит и резко выпрямляет её. Мачта проходит сквозь воздух, и парус даёт толчок. Матрос сделает перекат сам. Твоя часть: войти в поворот с хода плавным рулём и на новом галсе вернуть две трети скорости за 16 секунд.',
+    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 7; state.heading = 46; state.vf = 1.9; ctl.sheet = 13; state.side = -1; ctl.rollTack = true; },
+    check(out, state, el, mem) {
+      if (mem.s0 === undefined) { mem.s0 = state.side; mem.v0 = 0; }
+      if (mem.t0 === undefined) {
+        if (state.side === mem.s0 && out.twaAbs > 38) mem.v0 = Math.max(mem.v0 * 0.995, out.speedKn);
+        if (out.twaAbs < 20) mem.t0 = el;
+        if (el > 40) return { fail: 'Поворот так и не начат. Разгонись в бейдевинд и плавно переложи руль к ветру.' };
+        return { progress: 0.1, note: `Разгон: ${out.speedKn.toFixed(1)} уз. Когда лодка пойдёт ровно, плавно приводись и поворачивай` };
+      }
+      const t = el - mem.t0;
+      if (out.rollTack) mem.rolled = true;
+      if (state.side !== mem.s0 && out.twaAbs > 36) {
+        const k = out.speedKn / Math.max(1, mem.v0);
+        if (k >= 0.66) return { progress: 1, done: true, note: `Поворот за ${t.toFixed(1)} с, скорость на выходе ${out.speedKn.toFixed(1)} из ${mem.v0.toFixed(1)} уз${mem.rolled ? ', с перекатом' : ''}` };
+        if (t > 16) return { fail: `За 16 секунд вернулось только ${pc(k)} скорости. Не дёргай руль: резкая перекладка тормозит. На новом галсе сразу подбери шкот и уваливайся до 45° к ветру.` };
+        return { progress: 0.4 + 0.6 * clamp01(k / 0.66), note: `Новый галс: ${out.speedKn.toFixed(1)} уз из ${mem.v0.toFixed(1)}. Подбирай шкот, разгоняйся` };
+      }
+      if (t > 18) return { fail: 'Лодка встала носом к ветру. В поворот входят с хода и руль держат до нового галса.' };
+      return { progress: 0.25, note: out.rollTack ? 'Перекат: матрос валит лодку на себя' : 'Держи руль, нос идёт через ветер' };
+    },
+  },
+  {
+    id: 'bylee', group: 'Мастерство', title: 'Фордевинд «за ветер»',
+    goal: 'На фордевинде лазер быстрее и устойчивее, когда ветер заходит чуть со стороны гика: поток идёт по парусу от задней шкаторины к мачте, колдунчики смотрят вперёд. Это называют «идти за ветер». Гик сейчас на правом борту. Увались вправо так, чтобы зайти за ветер на 10–25°, и продержись 10 секунд. Зайдёшь дальше — заднюю шкаторину заломит и гик перебросит.',
+    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 11; state.heading = 172; state.vf = 3; ctl.sheet = 88; state.side = -1; },
+    check(out, state, el, mem) {
+      if (mem.b0 === undefined) mem.b0 = Math.sign(state.boom) || 1;
+      if (Math.sign(state.boom) !== mem.b0 && Math.abs(state.boom) > 20) return { fail: 'Гик перебросило: зашёл за ветер слишком далеко. Держи 10–25° и следи за задней шкаториной.' };
+      const ok = out.byLee >= 10 && out.byLee <= 27, t = hold(mem, el, ok);
+      const note = out.byLee < 2 ? 'Ветер пока с наветренной стороны: уваливайся вправо, за линию ветра' : out.byLee < 10 ? `За ветер ${Math.round(out.byLee)}°: ещё немного` : ok ? `За ветер ${Math.round(out.byLee)}°: держи… ${t.toFixed(0)} из 10 с` : `За ветер ${Math.round(out.byLee)}°: слишком далеко, приведись`;
+      return { progress: clamp01(t / 10), done: t >= 10, note };
+    },
+  },
+  {
+    id: 'capsize', group: 'Мастерство', title: 'Подъём после переворота', allowCapsize: true,
+    goal: 'Лодка лежит на борту, мачта смотрит на ветер. Если встать на шверт сейчас, ветер подхватит парус на подъёме и перебросит лодку на другой борт. Сначала разверни её носом к ветру: клавиша G или кнопка «Нос к ветру». Потрави шкот. Затем вставай на шверт: клавиша T. Подними лодку с первого раза и набери 2 узла.',
+    setup(state, ctl) { ctl.windFrom = 0; ctl.windSpeed = 14; state.heading = 90; state.vf = 0; ctl.sheet = 30; state.side = -1; ctl.autoRight = false; },
+    check(out, state, el, mem) {
+      if (!mem.init) { mem.init = true; state.capsized = 0.01; state.capsizeSide = 1; state.righting = 0; state.capsizes = 1; state.vf = 0; }
+      if (state.capsizes > 1) return { fail: mem.up ? 'Лодка легла снова: шкот был выбран, и парус сразу набрал ветер. Перед подъёмом шкот травят.' : 'Лодку перебросило: мачта лежала на ветер. Сначала разверни нос к ветру, потом вставай на шверт.' };
+      if (!state.capsized) mem.up = true;
+      if (el > 90) return { fail: 'Слишком долго: в холодной воде счёт идёт на минуты. Ещё раз!' };
+      const note = state.righting ? 'Лодка встаёт…' : state.capsized ? (out.mastUpwind ? 'Мачта на ветер: разверни нос к ветру (G)' : 'Мачта под ветром: потрави шкот и вставай на шверт (T)') : `Лодка на ровном киле: набери ход, ${out.speedKn.toFixed(1)} из 2 уз`;
+      return { progress: state.capsized ? (out.mastUpwind ? 0.1 : 0.4) : 0.6 + 0.4 * clamp01(out.speedKn / 2), done: mem.up && out.speedKn >= 2, note };
+    },
+    teardown(ctl) { ctl.autoRight = true; ctl.swimBow = false; },
   },
   {
     id: 'spin', group: 'Мастерство', title: 'Штрафной оборот 720°',

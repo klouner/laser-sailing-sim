@@ -12,6 +12,8 @@ import { loadTop, isRecord, submit, rememberName, savedName, isShared } from './
 import { initAnalytics } from './analytics.js';
 import { createAudio } from './audio.js';
 import { targetSpeed } from './polar.js';
+import { createScenery } from './gfx/scenery.js';
+import { createFleet } from './fleet.js';
 
 const DEG = Math.PI / 180;
 const $ = (id) => document.getElementById(id);
@@ -28,10 +30,10 @@ const LEVELS = {
   high: { maxDpr: Math.min(DEVICE_DPR, 2), minDpr: 1, shadow: 2048, fx: 2 },
 };
 const LEVEL_NAME = { low: 'низкое', med: 'среднее', high: 'высокое' };
-const prefs = { quality: 'auto', fps: false, sound: true, sky: 'day' };
-try { Object.assign(prefs, JSON.parse(localStorage.getItem('laser3d2.view') || '{}')); } catch (e) {}
+const prefs = { quality: 'auto', fps: false, sound: true, sky: 'morning', fleet: true };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem('laser3d2.view3') || '{}')); } catch (e) {}
 if (!LEVELS[prefs.quality]) prefs.quality = 'auto';
-const savePrefs = () => { try { localStorage.setItem('laser3d2.view', JSON.stringify(prefs)); } catch (e) {} };
+const savePrefs = () => { try { localStorage.setItem('laser3d2.view3', JSON.stringify(prefs)); } catch (e) {} };
 const audio = createAudio(), sound = { aws: 0, speed: 0, luff: 0, sheet: 45, slam: 0, paused: false };
 audio.setEnabled(false);
 // звук можно включить только из обработчика действия пользователя: первое касание или клавиша
@@ -44,7 +46,8 @@ let QUALITY = LEVELS[level];
 const world = createWorld(canvas, { antialias: level !== 'low' && !(isTouch && DEVICE_DPR >= 2) });
 let dpr = QUALITY.maxDpr;
 world.engine.setHardwareScalingLevel(1 / dpr);
-if (!SKIES[prefs.sky]) prefs.sky = 'day';
+const scenery = createScenery(world);
+if (!SKIES[prefs.sky]) prefs.sky = 'morning';
 world.setSky(prefs.sky);
 const camera = world.camera;
 // статистика: что сейчас на экране, читается раз в 30 секунд
@@ -70,10 +73,13 @@ arrows.vel.labelAt = 1.0; arrows.vel.labelLift = 0.3;
 arrows.force.labelAt = 1.0; arrows.force.labelLift = 0.3;
 
 const course = createCourse(world, env);
+const fleet = createFleet(world, env);
+course.showCourse(true);                      // знаки и судейский катер стоят на воде всегда: акватория живая
 const lessons = createLessonRunner();
 
 // ---------- состояние ----------
 const state = createState();
+state.x = -6; state.z = 24;                    // под стартовой линией
 const ctl = defaultControls();
 settleRig(state, ctl);
 ctl.heading = state.heading;
@@ -123,7 +129,11 @@ $('gusts').addEventListener('change', (e) => { if (raceLocked() || lessons.run.s
 
 $('btn-pause').addEventListener('click', togglePause);
 $('btn-reset').addEventListener('click', reset);
+$('rollTack').addEventListener('change', (e) => { ctl.rollTack = e.target.checked; });
+$('autoRight').addEventListener('change', (e) => { ctl.autoRight = e.target.checked; });
+$('btn-bow').addEventListener('click', () => { if (state.capsized && !state.righting) ctl.swimBow = !ctl.swimBow; });
 $('btn-tack').addEventListener('click', () => {
+  if (state.capsized) { if (!state.righting) ctl.rightBoat = true; return; }
   if (raceLocked() || lessons.run.status === 'running') { toast('В уроках и гонке поворот делаем рулём вручную'); return; }
   const twa = norm180(ctl.windFrom - state.heading);
   if (Math.abs(twa) > 95) { // на попутных курсах — поворот фордевинд
@@ -215,7 +225,7 @@ bindPad($('t-rudder'), $('t-rudder-thumb'), true, (k) => setRudder(k * 35), null
 bindPad($('t-sheet'), $('t-sheet-thumb'), false, (k) => setSheet(BOAT.boomMin + k * (90 - BOAT.boomMin)));
 $('t-pause').addEventListener('click', togglePause);
 $('t-cam').addEventListener('click', () => { setCamera(CAM_ORDER[(CAM_ORDER.indexOf(camMode) + 1) % CAM_ORDER.length]); });
-$('t-tack').addEventListener('click', () => $('btn-tack').click());
+$('t-tack').addEventListener('click', () => { if (state.capsized && state.out.mastUpwind && !ctl.swimBow) ctl.swimBow = true; else $('btn-tack').click(); });
 $('t-auto').addEventListener('click', () => setAutoSheet(!ctl.autoSheet));
 $('t-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
 $('t-windChip').addEventListener('click', () => $('panel').classList.add('open'));
@@ -246,7 +256,7 @@ function togglePause() {
 function reset() {
   const s = createState();
   Object.assign(state, s); holdTarget = null;
-  state.heading = 90; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null;
+  state.x = -6; state.z = 24; state.heading = 90; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null;
   ctl.sheet = 45; ui.sheet.value = 45; settleRig(state, ctl);
   if (camMode !== 'free') setCamera(camMode);
 }
@@ -259,6 +269,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') setCamera(CAM_ORDER[(CAM_ORDER.indexOf(camMode) + 1) % CAM_ORDER.length]);
   if (e.code === 'KeyV') { const v = !show.trueWind; for (const k of ['trueWind', 'appWind', 'vel', 'force']) show[k] = v; ['showTrue', 'showApp', 'showVel', 'showForce'].forEach(id => $(id).checked = v); }
   if (e.code === 'KeyT') $('btn-tack').click();
+  if (e.code === 'KeyG') $('btn-bow').click();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -284,7 +295,7 @@ function handleKeys(dt) {
 }
 
 // ---------- тренировка: уроки, гонка, рекорды ----------
-let toastTimer = 0;
+let toastTimer = 0, capUI = false;
 function toast(text, big = false, ms = 2200) {
   const el = $('toast'); el.textContent = text; el.className = 'toast' + (big ? ' big' : ''); el.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms);
@@ -331,16 +342,15 @@ function startRace() {
   resetForTraining();
   mode = 'race';
   stats.track('race', { result: 'start' });
-  course.start(state, ctl);
+  course.start(state, ctl, $('fullStart').checked);
   ui.sheet.value = ctl.sheet; ui.windFrom.value = ctl.windFrom; ui.windSpeed.value = ctl.windSpeed;
   tb.bar.hidden = false; tb.bar.className = 'trainbar'; tb.next.hidden = true;
-  tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Два буя'; tb.goal.textContent = 'Обогни оранжевый буй (110 м против ветра): пройди выше него и вернись с другой стороны. Финиш между синими буями.';
+  tb.tag.textContent = 'ГОНКА'; tb.title.textContent = 'Старт по флагам'; tb.goal.textContent = 'Идёт стартовая процедура. Сигналы: флаг класса, флаг «П», флаг «П» долой, старт. Линия между оранжевым знаком и мачтой судейского катера. В момент сигнала корпус должен быть под линией: иначе флаг «X», и придётся вернуться. Время идёт от сигнала. Обогни наветренный знак в 110 м и финишируй через ту же линию.';
   tb.note.textContent = ''; tb.fill.style.width = '0%'; tb.time.textContent = '';
   renderLessonList(); setCamera(camMode === 'free' ? 'chase' : camMode); lastHeading = state.heading; showGoal(6000);
-  toast('3', true, 900);
 }
 function exitTraining() {
-  lessons.stop(ctl); course.stop(); mode = 'free';
+  lessons.stop(ctl); course.stop(); course.showCourse(true); mode = 'free';
   if (gustsBefore !== null) { ctl.gusts = gustsBefore; $('gusts').checked = ctl.gusts; gustsBefore = null; }
   tb.bar.hidden = true; renderLessonList();
 }
@@ -356,7 +366,7 @@ tb.next.addEventListener('click', () => {
 $('btn-race').addEventListener('click', () => { startRace(); $('panel').classList.remove('open'); });
 $('btn-course').addEventListener('click', () => {
   // свободная тренировка на трассе: буи видны, лодка на старте, ветер с севера, без таймера
-  lessons.stop(ctl); course.stop(); mode = 'free'; tb.bar.hidden = true;
+  lessons.stop(ctl); course.stop(); course.showCourse(true); mode = 'free'; tb.bar.hidden = true;
   const s = createState(); Object.assign(state, s);
   state.x = 0; state.z = 12; state.heading = 45; state.vf = 1.5; holdTarget = null; settleRig(state, ctl);
   ctl.windFrom = 0; ui.windFrom.value = 0; ctl.rudder = 0; ui.rudder.value = 0; autopilot = null; setCompass(false);
@@ -395,24 +405,37 @@ function askName(time) {
 }
 let wasCapsized = false;
 function updateTraining(out, dt, t) {
-  if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running') { lessons.run.status = 'failed'; stats.track('lesson', { id: lessons.run.lesson.id, result: 'failed', why: 'capsize' }); lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
+  if (out.capsized && !wasCapsized) { audio.splash(); toast('ОВЕРКИЛЬ', true, 2500); if (mode === 'lesson' && lessons.run.status === 'running' && !lessons.run.lesson.allowCapsize) { lessons.run.status = 'failed'; stats.track('lesson', { id: lessons.run.lesson.id, result: 'failed', why: 'capsize' }); lessons.run.fail = 'Оверкиль: крен стал критическим. В порыве травите шкот и приводитесь, откренивайте заранее.'; tb.bar.classList.add('fail'); tb.note.textContent = lessons.run.fail; } }
   wasCapsized = !!out.capsized;
+  if (wasCapsized !== capUI) { capUI = wasCapsized; $('btn-bow').hidden = !capUI; $('btn-tack').textContent = capUI ? 'Встать на шверт' : 'Оверштаг'; $('btn-tack').classList.toggle('accent', capUI); if (!capUI) ctl.swimBow = false; }
+  $('btn-bow').classList.toggle('on', !!ctl.swimBow);
   if (mode === 'race') {
     const r = course.race;
-    if (r.phase === 'countdown') {
-      ctl.paused = true;
-      const n = Math.ceil(r.countdown); tb.time.textContent = String(n);
-      if (n !== updateTraining.lastN) { updateTraining.lastN = n; if (n > 0) toast(String(n), true, 900); }
-    }
     const ev = course.update(state, ctl, dt, t);
-    if (ev === 'go') { ctl.paused = false; toast('СТАРТ!', true, 1200); $('btn-pause').textContent = 'Пауза'; $('t-pause').classList.remove('active'); }
-    if (ev === 'rounded') toast('Буй обогнут! Теперь по ветру, финиш между синими буями', false, 2800);
-    if (ev === 'notRounded') toast('Буй не обогнут: пройдите выше него и вернитесь с другой стороны', false, 3200);
-    if (ev === 'missedGate') toast('Мимо ворот: финиш между синими буями', false, 2800);
-    if (r.phase === 'leg1' || r.phase === 'leg2') {
+    if (ev === 'warning') { audio.horn(); toast('Предупреждение: флаг класса поднят', false, 3000); }
+    if (ev === 'prep') { audio.horn(); toast('Подготовительный: флаг «П» поднят', false, 3000); }
+    if (ev === 'oneMin') { audio.horn(true); toast(r.seq > 100 ? 'Минута до старта: флаг «П» долой' : 'Флаг «П» долой: скоро старт', false, 3000); }
+    if (ev === 'go') { audio.horn(); toast('СТАРТ!', true, 1400); }
+    if (ev === 'ocs') { audio.horn(); setTimeout(() => audio.horn(), 900); toast('ФАЛЬСТАРТ: флаг «X»', true, 2600); }
+    if (ev === 'ocsClear') toast('Вернулся за линию. Стартуй заново', false, 2600);
+    if (ev === 'missedLine') toast('Мимо линии: старт между знаком и катером', false, 2800);
+    if (ev === 'started') toast(r.startDelay < 2 ? `Отличный старт: ${r.startDelay.toFixed(1)} с после сигнала` : `Линия пройдена через ${r.startDelay.toFixed(1)} с после сигнала`, false, 3000);
+    if (r.phase === 'prestart' || (r.phase === 'leg1' && !r.started)) {
+      const tt = Math.max(0, r.toStart), bias = norm180(state.out.windFrom - 0);
+      tb.time.textContent = r.phase === 'prestart' ? fmtTime(tt).replace(/\.\d$/, '') : fmtTime(r.t);
+      const edge = Math.abs(bias) < 2 ? 'линия ровная' : `выгоднее край ${bias > 0 ? 'у катера' : 'у знака'} (${Math.abs(Math.round(bias))}°)`;
+      const d = r.lineDist, lt = r.lineTime;
+      const where = d < 0 ? `ЗА ЛИНИЕЙ на ${(-d).toFixed(0)} м` : `до линии ${d.toFixed(0)} м` + (isFinite(lt) && lt < 99 ? `, дойдёшь за ${lt.toFixed(0)} с` : '');
+      tb.note.textContent = r.phase === 'prestart' ? `${r.stage === 1 ? 'Флаги: класс и «П»' : 'Флаг: класс'} · ${where} · ${edge}` : (r.ocs ? 'Фальстарт: вернись за линию целиком' : `Старт дан! ${where}`);
+      tb.fill.style.width = (r.phase === 'prestart' ? (1 - tt / r.seq) * 12 : 12).toFixed(1) + '%';
+    }
+    if (ev === 'rounded') toast('Знак обогнут! Теперь по ветру, финиш между знаком и катером', false, 2800);
+    if (ev === 'notRounded') toast('Знак не обогнут: пройдите выше него и вернитесь с другой стороны', false, 3200);
+    if (ev === 'missedGate') toast('Мимо линии: финиш между знаком и катером', false, 2800);
+    if ((r.phase === 'leg1' && r.started) || r.phase === 'leg2') {
       tb.time.textContent = fmtTime(r.t);
-      tb.note.textContent = `${r.phase === 'leg1' ? 'К оранжевому бую' : 'К финишным воротам'} · ${Math.round(r.dist)} м · пеленг ${Math.round(r.bearing)}°`;
-      const legLen = 110; const p = r.phase === 'leg1' ? 0.5 * (1 - Math.min(1, r.dist / legLen)) : 0.5 + 0.5 * (1 - Math.min(1, r.dist / legLen));
+      tb.note.textContent = `${r.phase === 'leg1' ? 'К наветренному знаку' : 'К финишной линии'} · ${Math.round(r.dist)} м · пеленг ${Math.round(r.bearing)}°`;
+      const legLen = 110; const p = r.phase === 'leg1' ? 0.12 + 0.44 * (1 - Math.min(1, r.dist / legLen)) : 0.56 + 0.44 * (1 - Math.min(1, r.dist / legLen));
       tb.fill.style.width = (p * 100).toFixed(1) + '%';
     }
     if (ev === 'finish') {
@@ -425,6 +448,7 @@ function updateTraining(out, dt, t) {
       if (rec) setTimeout(() => askName(r.result), 1500);
     }
   } else if (mode === 'lesson') {
+    course.update(state, ctl, dt, t);
     const run = lessons.run;
     const ev = lessons.update(out, state, ctl, dt, course);
     if (run.status === 'running') { tb.fill.style.width = (run.progress * 100).toFixed(1) + '%'; tb.note.textContent = run.note; tb.time.textContent = fmtTime(run.el); }
@@ -435,10 +459,10 @@ function updateTraining(out, dt, t) {
       stats.track('lesson', { id: run.lesson.id, result: 'done', sec: Math.round(run.el) });
     }
     if (ev === 'fail') { tb.bar.classList.add('fail'); tb.note.textContent = run.fail; stats.track('lesson', { id: run.lesson.id, result: 'failed', sec: Math.round(run.el) }); }
-  }
+  } else course.update(state, ctl, dt, t);       // знаки качаются на волне, флаги полощут
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { get level() { return level; }, prefs, stats, world, camera, get rig() { return rig; }, setCamera, boat, audio, get look() { return rig.look; }, state, ctl, course, lessons, startRace, startLesson, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { fleet, scenery, get level() { return level; }, prefs, stats, world, camera, get rig() { return rig; }, setCamera, boat, audio, get look() { return rig.look; }, state, ctl, course, lessons, startRace, startLesson, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const rig = createCameraRig(world, canvas, boat);
@@ -453,6 +477,7 @@ function setCamera(mode) {
 }
 function updateCamera(dt) { rig.update(dt, state); }
 setCamera('chase');
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches && !/[?&]nointro/.test(location.search)) rig.intro();
 
 // ---------- панель: вывод ----------
 let uiAcc = 0;
@@ -469,6 +494,8 @@ function updateUI(out, dt) {
   setText('v-twa', `${Math.round(Math.abs(out.TWA))}° к ветру`);
   if (document.activeElement !== ui.heading) ui.heading.value = Math.round(state.heading);
   if ($('autoTrim').checked !== ctl.autoTrim) syncTrimUI();
+  if ($('autoRight').checked !== (ctl.autoRight !== false)) $('autoRight').checked = ctl.autoRight !== false;
+  if ($('rollTack').checked !== (ctl.rollTack !== false)) $('rollTack').checked = ctl.rollTack !== false;
   if (mode === 'lesson' && +ui.windSpeed.value !== ctl.windSpeed) ui.windSpeed.value = ctl.windSpeed;
   for (const id of trimIds) {
     const pc = Math.round((ctl.autoTrim ? state.trim[id] : ctl[id]) * 100);
@@ -556,7 +583,7 @@ const fx = { level: QUALITY.fx };                    // читают эффек�
 function setLevel(name) {
   level = name; QUALITY = LEVELS[name]; fx.level = QUALITY.fx;
   dpr = QUALITY.maxDpr; perf.cap = dpr; perf.slow = 0; perf.fast = 0;
-  world.setEffects(QUALITY.fx, QUALITY.shadow);
+  world.setEffects(QUALITY.fx, QUALITY.shadow); syncFleet();
   layoutDirty = true; showQuality(); showFps();
 }
 function showQuality() {
@@ -590,6 +617,9 @@ $('q-seg').addEventListener('click', (e) => {
 function showSky() { for (const b of $('sky-seg').children) b.classList.toggle('active', b.dataset.sky === prefs.sky); }
 $('sky-seg').addEventListener('click', (e) => { const k = e.target.dataset && e.target.dataset.sky; if (!k) return; prefs.sky = k; savePrefs(); world.setSky(k); showSky(); });
 $('soundOn').checked = prefs.sound;
+// соперники рисуются на среднем и высоком качестве: на слабом устройстве их лодки слишком дороги
+function syncFleet() { fleet.setEnabled(prefs.fleet !== false && QUALITY.fx >= 1); $('showFleet').checked = prefs.fleet !== false; }
+$('showFleet').addEventListener('change', (e) => { prefs.fleet = e.target.checked; savePrefs(); syncFleet(); });
 $('soundOn').addEventListener('change', (e) => { prefs.sound = e.target.checked; savePrefs(); audio.setEnabled(prefs.sound); });
 $('showFps').checked = prefs.fps;
 $('showFps').addEventListener('change', (e) => { prefs.fps = e.target.checked; savePrefs(); showFps(); });
@@ -628,6 +658,8 @@ function simulate(dt) {
   const e = sprayE; e.x = state.x; e.z = state.z; e.fx = out.fx; e.fz = out.fz; e.sx = out.sx; e.sz = out.sz; e.vx = out.Vx; e.vz = out.Vz;
   e.heave = boat.sea.heave; e.sf = boat.sea.sf; e.speed = out.capsized ? 0 : Math.max(0, state.vf);
   spray.update(ctl.paused ? 0 : dt, e, fx.level >= 1);
+  scenery.update(t, dt, state.x, state.z);
+  fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused);
   return out;
 }
 function frame() {
@@ -665,7 +697,7 @@ function frame() {
   updateCamera(dt);
   updateUI(out, dt);
   mapAcc += dt;
-  if (hudVisible && mapAcc >= 0.05) { mapAcc = 0; drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.G1, color: '#0047ff', active: course.race.phase === 'leg2' }, { ...course.marks.G2, color: '#0047ff', active: course.race.phase === 'leg2' }] } : null); }
+  if (hudVisible && mapAcc >= 0.05) { mapAcc = 0; drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.G1, color: '#ff5700', active: course.race.phase === 'leg2' }, { ...course.marks.G2, color: '#17337f', active: course.race.phase === 'leg2' }] } : null); }
   // сцена: вода, небо, свет стоят вокруг камеры и лодки
   const ov = course.overlay(), ringOn = camMode !== 'cockpit';
   world.update(env, { dt, paused: ctl.paused, x: state.x, z: state.z, fx: out.fx, fz: out.fz, speed: state.vf, capsized: !!out.capsized,
@@ -680,7 +712,7 @@ function frame() {
   labels.update();
 }
 
-showQuality(); showFps(); showSky(); world.setEffects(QUALITY.fx, QUALITY.shadow);
+showQuality(); showFps(); showSky(); world.setEffects(QUALITY.fx, QUALITY.shadow); syncFleet();
 { const v = new URL(import.meta.url).searchParams.get('v'); if (v) $('ver').textContent = 'Версия ' + v + '.'; }
 frame();
 requestAnimationFrame(() => $('loading').classList.add('hide'));

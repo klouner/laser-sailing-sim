@@ -120,7 +120,7 @@ export function createWorld(canvas, { antialias = true } = {}) {
   hemi.specular = new B.Color3(0, 0, 0);
   const shadowGen = new B.ShadowGenerator(2048, sun);
   shadowGen.usePercentageCloserFiltering = true; shadowGen.filteringQuality = B.ShadowGenerator.QUALITY_MEDIUM;
-  shadowGen.bias = 0.0012; shadowGen.normalBias = 0.012; shadowGen.darkness = 0.12;
+  shadowGen.bias = 0.003; shadowGen.normalBias = 0.035; shadowGen.darkness = 0.12;
   sun.autoUpdateExtends = true; sun.autoCalcShadowZBounds = true; sun.shadowOrthoScale = 0.08;
 
   // ---- небо ----
@@ -176,30 +176,31 @@ export function createWorld(canvas, { antialias = true } = {}) {
   const ip = pipeline.imageProcessing;
   ip.toneMappingEnabled = true; ip.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES; ip.exposure = 1.25; ip.contrast = 1.1;
   ip.vignetteEnabled = true; ip.vignetteWeight = 0.9; ip.vignetteStretch = 0.2; ip.vignetteColor = new B.Color4(0, 0, 0, 0);
-  pipeline.bloomEnabled = true; pipeline.bloomThreshold = 0.92; pipeline.bloomWeight = 0.32; pipeline.bloomKernel = 56; pipeline.bloomScale = 0.5;
+  pipeline.bloomEnabled = true; pipeline.bloomThreshold = 1.7; pipeline.bloomWeight = 0.28; pipeline.bloomKernel = 56; pipeline.bloomScale = 0.5;
   pipeline.fxaaEnabled = true;
 
   // ---- время суток ----
   const state = { sky: null, skyKey: '', cloudX: 0, cloudZ: 0, flipMirror: 0, flipShadow: 0, fx: { shadow: true, mirror: true, foam: true, bloom: true } };
   const v3 = (a) => new B.Vector3(a[0], a[1], a[2]);
   let envCube = null;
+  const skyMats = [skyMat, oceanMat];           // материалы, которым нужны цвета неба; берег добавляет сюда свой
   function setSky(key) {
     const s = SKIES[key] || SKIES.day; state.sky = s; state.skyKey = key;
     const az = SUN_AZIMUTH * DEG, el = s.elev * DEG;
     sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
     sun.direction.copyFrom(sunDir).scaleInPlace(-1);
     const lum = Math.max(s.sun[0], s.sun[1], s.sun[2]);
-    sun.diffuse = new B.Color3(s.sun[0] / lum, s.sun[1] / lum, s.sun[2] / lum); sun.specular = sun.diffuse; sun.intensity = lum * 0.95;
+    sun.diffuse = new B.Color3(s.sun[0] / lum, s.sun[1] / lum, s.sun[2] / lum); sun.specular = sun.diffuse; sun.intensity = lum * 0.50;
     const amb = (c) => 0.55 * (s.horizon[c] * 0.75 + s.zenith[c] * 0.25) + 0.45 * (s.horizon[0] + s.horizon[1] + s.horizon[2]) / 3;
     hemi.diffuse = new B.Color3(amb(0), amb(1), amb(2));
-    hemi.groundColor = new B.Color3(s.deep[0] * 2 + 0.03, s.deep[1] * 2 + 0.03, s.deep[2] * 2 + 0.03); hemi.intensity = 0.85 * s.ambient;
-    for (const m of [skyMat, oceanMat]) {
+    hemi.groundColor = new B.Color3(s.deep[0] * 2 + 0.03, s.deep[1] * 2 + 0.03, s.deep[2] * 2 + 0.03); hemi.intensity = 0.42 * s.ambient;
+    for (const m of skyMats) {
       m.setVector3('uSunDir', sunDir); m.setVector3('uSunCol', v3(s.sun)); m.setVector3('uZenith', v3(s.zenith)); m.setVector3('uHorizon', v3(s.horizon)); m.setVector3('uHaze', v3(s.haze));
     }
     skyMat.setVector3('uDeepFar', new B.Vector3(s.deep[0] * 1.4 + s.haze[0] * 0.12, s.deep[1] * 1.4 + s.haze[1] * 0.12, s.deep[2] * 1.4 + s.haze[2] * 0.12));
     oceanMat.setVector3('uDeep', v3(s.deep)); oceanMat.setVector3('uScatter', v3(s.scatter));
     if (envCube) envCube.dispose();
-    envCube = makeEnvCube(scene, s); scene.environmentTexture = envCube; scene.environmentIntensity = 0.55 * s.ambient;
+    envCube = makeEnvCube(scene, s); scene.environmentTexture = envCube; scene.environmentIntensity = 0.40 * s.ambient;
   }
   setSky('day');
 
@@ -283,5 +284,5 @@ export function createWorld(canvas, { antialias = true } = {}) {
     if (shadowSize && shadowGen.mapSize !== shadowSize) shadowGen.mapSize = shadowSize;
   }
 
-  return { B, engine, scene, camera, sun, sunDir, shadowGen, pipeline, ocean, oceanMat, skyDome, mirror, shadowMask, noiseTex, state, setSky, addBoatMesh, update, setEffects, render: () => scene.render() };
+  return { B, engine, scene, camera, skyMats, sun, sunDir, shadowGen, pipeline, ocean, oceanMat, skyDome, mirror, shadowMask, noiseTex, state, setSky, addBoatMesh, update, setEffects, render: () => scene.render() };
 }
