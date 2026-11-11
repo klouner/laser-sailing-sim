@@ -227,8 +227,8 @@ export function createSailor(g) {
     solveElbow(shB, P.handB, ARM1, ARM2, tv().set(0.2 + 0.1 * backB, -1 + 0.6 * backB, sv * 0.3 + outS * 0.9 * backB), P.elbowB);
     // в кулаке задней руки удлинитель румпеля, в кулаке передней — шкот от блока
     const gripB = tv().subVectors(P.handB, c.blockTop).normalize();
-    body.arm(0, shA, P.elbowA, P.handA, toWant, firstPerson, ax);
-    body.arm(1, shB, P.elbowB, P.handB, gripB, firstPerson, ax);
+    body.arm(0, shA, P.elbowA, P.handA, toWant, false, ax);
+    body.arm(1, shB, P.elbowB, P.handB, gripB, false, ax);
     // удлинитель румпеля направлен на точку хвата, длина постоянная
     res.extTip.copy(pivotHull).addScaledVector(toWant, EXT_LEN);
     // шкот от блока в руку

@@ -167,6 +167,7 @@ export function createBoat(world, env, opts = {}) {
   const matCap = pbr('cap', [0.9, 0.9, 0.9], 0.8);
   const matGlass = pbr('glass', [0.005, 0.005, 0.006], 0.18, 0.6);
   const matBody = pbr('body', [1, 1, 1], 0.74);
+  try { matBody.sheen.isEnabled = true; matBody.sheen.intensity = 0.35; matBody.sheen.color = new B.Color3(0.6, 0.65, 0.75); } catch (e) {}     // ткань: мягкий отсвет на скользящих углах
   const matGreen = pbr('ttG', [0.03, 0.55, 0.14], 0.9), matRed = pbr('ttR', [0.85, 0.06, 0.06], 0.9);
   if (player) try { new SinkPlugin(matHull, env); new SinkPlugin(matFoil, env); new SinkPlugin(matBody, env); new SinkPlugin(matSkin, env); } catch (e) { console.warn('подводный оттенок отключён:', e.message); }
 
