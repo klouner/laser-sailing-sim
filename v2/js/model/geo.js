@@ -83,7 +83,7 @@ export function buildHull() {
 export function buildDeck() {
   const NX = 190, NZ = 60, row = NZ + 1;
   const pos = [], col = [], uv = [], idx = [];
-  const cDeck = [0.86, 0.88, 0.90], cGrip = [0.74, 0.77, 0.80], cPit = [0.70, 0.73, 0.77], cWall = [0.80, 0.83, 0.86];
+  const cDeck = [0.80, 0.82, 0.84], cGrip = [0.56, 0.60, 0.65], cPit = [0.50, 0.54, 0.59], cWall = [0.68, 0.71, 0.75];
   for (let i = 0; i <= NX; i++) {
     const st = stationAt(i / NX), crown = crownAt(st.x);
     for (let j = 0; j <= NZ; j++) {

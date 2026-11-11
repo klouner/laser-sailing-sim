@@ -119,11 +119,11 @@ export function createBoat(world, env) {
 
   // ---- материалы ----
   const pbr = (name, rgb, rough, metal = 0) => { const m = new B.PBRMaterial(name, scene); m.albedoColor = new B.Color3(rgb[0], rgb[1], rgb[2]); m.roughness = rough; m.metallic = metal; return m; };
-  const matHull = pbr('hull', [1, 1, 1], 0.24); matHull.albedoTexture = hullTexture(scene);
+  const matHull = pbr('hull', [0.86, 0.87, 0.88], 0.24); matHull.albedoTexture = hullTexture(scene);
   matHull.clearCoat.isEnabled = true; matHull.clearCoat.intensity = 0.7; matHull.clearCoat.roughness = 0.12;
   const matDeck = pbr('deck', [1, 1, 1], 0.72);
-  const matGel = pbr('gel', [0.92, 0.93, 0.94], 0.3);
-  const matFoil = pbr('foil', [0.9, 0.91, 0.92], 0.28); matFoil.clearCoat.isEnabled = true; matFoil.clearCoat.intensity = 0.5;
+  const matGel = pbr('gel', [0.80, 0.81, 0.82], 0.3);
+  const matFoil = pbr('foil', [0.80, 0.81, 0.82], 0.28); matFoil.clearCoat.isEnabled = true; matFoil.clearCoat.intensity = 0.5;
   const matAlu = pbr('alu', [0.72, 0.74, 0.77], 0.36, 1);
   const matAluDark = pbr('aluDark', [0.20, 0.21, 0.23], 0.42, 1);
   const matDark = pbr('dark', [0.016, 0.018, 0.022], 0.5);
@@ -254,7 +254,7 @@ export function createBoat(world, env) {
   for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) { const a = i * (NV + 1) + j, b = a + 1, c = a + NV + 1, d = c + 1; sailIdx.push(a, b, c, b, d, c); }
   const sailData = { positions: sailPos, indices: new Uint32Array(sailIdx), uvs: sailUV };
   const mkSailMat = (name, tex, front) => {
-    const m = pbr(name, [1, 1, 1], 0.86); m.albedoTexture = tex; m.backFaceCulling = true; m.cullBackFaces = front; m.twoSidedLighting = true;
+    const m = pbr(name, [0.9, 0.9, 0.9], 0.86); m.albedoTexture = tex; m.backFaceCulling = true; m.cullBackFaces = front; m.twoSidedLighting = true;
     // парус просвечивает: теневая сторона получает часть прошедшего сквозь ткань света
     m.subSurface.isTranslucencyEnabled = true; m.subSurface.translucencyIntensity = 0.55; m.subSurface.minimumThickness = 0.2; m.subSurface.maximumThickness = 0.2;
     m.subSurface.tintColor = new B.Color3(1, 0.98, 0.94);
