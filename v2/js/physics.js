@@ -155,7 +155,7 @@ export function optimalSheet(awaAbs) {
 // оттяжка шкотового угла (аутхол) убирает пузо внизу.
 export function autoTrim(windKn, twaAbs, o) {
   const breeze = smooth(8, 18, windKn), off = smooth(60, 115, twaAbs);
-  o.vang = (0.35 + 0.55 * breeze) * (1 - off) + (0.6 + 0.35 * smooth(14, 24, windKn)) * off;   // в свежий ветер на попутных оттяжку добивают, иначе раскачает
+  o.vang = (0.35 + 0.55 * breeze) * (1 - off) + (0.6 + 0.25 * smooth(6, 12, windKn) + 0.1 * smooth(14, 24, windKn)) * off;   // на попутных оттяжку добивают уже в средний ветер, иначе раскачает
   o.cunn = breeze * (1 - off);
   o.out = (0.45 + 0.45 * breeze) * (1 - off) + 0.25 * off;
   return o;
@@ -210,7 +210,9 @@ export function step(state, ctl, dt, env = null) {
   const AWA = Math.atan2(-aS0, -aF0) / DEG;                           // откуда, + справа
   const TWA = norm180(windFrom - state.heading);
   const awaAbs = Math.abs(AWA), twaAbs = Math.abs(TWA);
-  if (awaAbs > 0.5 && AWS > 0.05) state.side = AWA >= 0 ? 1 : -1;
+  // С какого борта ветер. На полных курсах галс определяет гик: вымпельный ветер гуляет через корму
+  // то слева, то справа, а матрос от этого не пересаживается, он сидит напротив гика.
+  if (awaAbs > 0.5 && AWS > 0.05) state.side = awaAbs > 110 && Math.abs(state.boom) > 15 ? -Math.sign(state.boom) : (AWA >= 0 ? 1 : -1);
   const side = state.side;
 
   // ---- шкот и руль доходят до заданного не мгновенно ----
@@ -221,7 +223,8 @@ export function step(state, ctl, dt, env = null) {
     else if (Math.abs(state.heel) < 6 || !maxed) state.depower -= 5 * dt;
     state.depower = clamp(state.depower, 0, 45);
   } else if (!ctl.autoSheet) state.depower = 0;
-  const sheetCmd = ctl.autoSheet ? (awaAbs > 135 ? 90 : clamp(optimalSheet(awaAbs) - 0.38 * (state.twist || 0) + state.depower, B.boomMin, 90)) : Math.max(B.boomMin, ctl.sheet);
+  // на фордевинде в свежий ветер гик чуть не доводят до упора: так верх паруса не уходит вперёд мачты
+  const sheetCmd = ctl.autoSheet ? (awaAbs > 135 ? 90 - 8 * smooth(8, 16, windKn) : clamp(optimalSheet(awaAbs) - 0.38 * (state.twist || 0) + state.depower, B.boomMin, 90)) : Math.max(B.boomMin, ctl.sheet);
   const capsized = state.capsized > 0;
   if (!ctl.paused) {
     const ds = sheetCmd - state.sheetNow;
