@@ -302,7 +302,9 @@ export function step(state, ctl, dt, env = null) {
   const heelDrag = 1 + 0.6 * Math.pow(state.heel / 30, 2);
   const Rh = -Math.sign(u) * hullResistance(u) * heelDrag * (u < 0 ? 1.3 : 1);
   const Yh = -(40 * v + 260 * v * Math.abs(v));
-  const Nh = -(60 * r + 320 * r * Math.abs(r)) + 80 * u * Math.abs(u) * sph;  // демпфирование; накренённый корпус приводится
+  // демпфирование; накренённый корпус приводится. На глиссировании в воде остаётся только корма,
+  // и приводящий момент с ростом скорости больше не растёт
+  const Nh = -(60 * r + 320 * r * Math.abs(r)) + 80 * u * Math.min(Math.abs(u), 3.2) * sph;
   // парусность корпуса, матроса и рангоута
   const wq = 0.5 * B.rhoAir * AWS;
   const Xw = wq * B.windageF * aF0, Yw = wq * B.windageS * aS0;
@@ -356,7 +358,8 @@ export function step(state, ctl, dt, env = null) {
     state.hike = clamp((Math.abs(state.crewY) - 0.45) / 0.6, 0, 1);
 
     // ---- интегрирование ----
-    const K = Kext - B.mass * G * GZ(phi) - B.crewMass * G * state.crewY * cph - 70 * p;
+    // качку гасит и сам корпус: чем быстрее идёт лодка, тем сильнее вода держит днище
+    const K = Kext - B.mass * G * GZ(phi) - B.crewMass * G * state.crewY * cph - (70 + 26 * Math.min(Math.abs(u), 7)) * p;
     u += (X / B.mU + v * r) * dt;
     v += (Yf / B.mV - u * r) * dt;
     if (ctl.lockHeading) r = 0; else r += (N / B.Izz) * dt;

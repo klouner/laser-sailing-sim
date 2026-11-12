@@ -636,6 +636,9 @@ function simulate(dt) {
   if (autopilot) {
     const err = norm180(autopilot.target - state.heading);
     ctl.rudder = clamp(err * 1.4 - state.yawRate * 0.4, -30, 30);
+    // Большой поворот: руль перекладывают плавно, вслед за кормой. Перо держится под углом около 12° к потоку,
+    // чуть не доходя до срыва: так лодка поворачивает быстрее всего и меньше теряет ход.
+    if (Math.abs(err) > 18) ctl.rudder = Math.sign(err) * Math.min(35, Math.atan2(Math.abs(state.yawRate) * Math.PI / 180 * 2.15, Math.max(0.3, state.vf)) * 180 / Math.PI + 12);
     ui.rudder.value = Math.round(ctl.rudder);
     if (Math.abs(err) < 2.5 && Math.abs(state.yawRate) < 6) { autopilot = null; ctl.rudder = 0; ui.rudder.value = 0; }
   }
@@ -659,7 +662,8 @@ function simulate(dt) {
   e.heave = boat.sea.heave; e.sf = boat.sea.sf; e.speed = out.capsized ? 0 : Math.max(0, state.vf);
   spray.update(ctl.paused ? 0 : dt, e, fx.level >= 1);
   scenery.update(t, dt, state.x, state.z);
-  fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused);
+  fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused, state);
+  if (fleet.contact) { audio.thud(1.6); toast(`Касание с лодкой ${fleet.contact}` + (course.race.active ? ': по правилам это штрафной оборот' : ''), false, 3200); }
   return out;
 }
 function frame() {
@@ -700,7 +704,7 @@ function frame() {
   if (hudVisible && mapAcc >= 0.05) { mapAcc = 0; drawMinimap(state, out, ctl, show, course.group.visible ? { marks: [{ ...course.marks.W, color: '#ff5700', active: course.race.phase === 'leg1' }, { ...course.marks.G1, color: '#ff5700', active: course.race.phase === 'leg2' }, { ...course.marks.G2, color: '#17337f', active: course.race.phase === 'leg2' }] } : null); }
   // сцена: вода, небо, свет стоят вокруг камеры и лодки
   const ov = course.overlay(), ringOn = camMode !== 'cockpit';
-  world.update(env, { dt, paused: ctl.paused, x: state.x, z: state.z, fx: out.fx, fz: out.fz, speed: state.vf, capsized: !!out.capsized,
+  world.update(env, { dt, paused: ctl.paused, x: state.x, z: state.z, fx: out.fx, fz: out.fz, speed: state.vf, capsized: !!out.capsized, wake2: fleet.wake,
     windFrom: out.windFrom, windKn: out.windKn, compass: 1, noGo: show.noGo, arrow: true, marks: ov.rings, line: ov.line });
   // подписи у компасного кольца
   const ly = boat.sea.heave + 0.12, R = 3.6;

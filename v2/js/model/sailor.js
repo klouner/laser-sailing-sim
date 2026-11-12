@@ -155,7 +155,7 @@ export function createSailor(g) {
     body.begin();
     // грудь смотрит внутрь лодки, при переходе — к носу
     const front = tv().set(cAx, 0, (before ? SS.sgn : -SS.sgn) * (1 - cAx) - 1e-4 * SS.sgn);
-    body.torso(P.hip, dir, ax, firstPerson, neck, front);
+    body.torso(P.hip, dir, ax, firstPerson, neck, front, 0.018 + 0.045 * h * (1 - crouch) + 0.03 * crouch);
     res.head.copy(P.headP); res.headYaw = sv * 0.35 * (1 - h * 0.4); res.headTilt = 0.02 + 0.1 * h;
     const shA = tv().copy(P.shoulder).addScaledVector(ax, -0.165); shA.y -= 0.02; shA.z += sv * 0.02;      // заднее плечо
     const shB = tv().copy(P.shoulder).addScaledVector(ax, 0.165); shB.y -= 0.02; shB.z += sv * 0.02;       // переднее

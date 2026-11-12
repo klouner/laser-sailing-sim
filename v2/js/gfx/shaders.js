@@ -280,6 +280,18 @@ uniform vec2 uShift;                  // на сколько сдвинулос�
 uniform vec4 uStep;                   // затухание, вычитание, размытие, размер текселя
 uniform vec4 uBoat;                   // положение лодки в текстуре, направление носа
 uniform vec4 uBoatP;                  // полудлина и полуширина в долях текстуры, сила пены у носа и за кормой
+uniform vec4 uBoat2; uniform vec4 uBoatP2;    // вторая лодка: ближайший соперник
+float hullFoam(vec4 boat, vec4 bp) {
+  vec2 r = vUV - boat.xy;
+  float bf = dot(r, boat.zw) / bp.x, bs = dot(r, vec2(-boat.w, boat.z)) / bp.y;
+  // обвод корпуса: острый нос, полная середина, чуть зауженная корма
+  float hw = bf > -0.25 ? sqrt(max(0.0, 1.0 - pow(clamp((bf + 0.25) / 1.25, 0.0, 1.0), 2.2))) : 1.0 - 0.22 * pow((-0.25 - bf) / 0.75, 2.0);
+  float inHull = step(-1.0, bf) * step(bf, 1.0);
+  float dH = abs(bs) - hw;
+  float bow = bp.z * inHull * (1.0 - smoothstep(0.0, 0.42, abs(dH - 0.1))) * smoothstep(-0.9, 0.7, bf);
+  float st = bp.w * (1.0 - smoothstep(0.0, 1.0, length(vec2((bf + 1.12) * 2.2, bs * 1.05))));
+  return max(bow, st);
+}
 void main() {
   vec2 uv = vUV + uShift;
   float f = 0.0;
@@ -288,15 +300,7 @@ void main() {
     float nb = texture2D(uPrev, uv + vec2(t, 0.0)).r + texture2D(uPrev, uv - vec2(t, 0.0)).r + texture2D(uPrev, uv + vec2(0.0, t)).r + texture2D(uPrev, uv - vec2(0.0, t)).r;
     f = max(0.0, mix(c, nb * 0.25, uStep.z) * uStep.x - uStep.y);
   }
-  vec2 r = vUV - uBoat.xy;
-  float bf = dot(r, uBoat.zw) / uBoatP.x, bs = dot(r, vec2(-uBoat.w, uBoat.z)) / uBoatP.y;
-  // обвод корпуса: острый нос, полная середина, чуть зауженная корма
-  float hw = bf > -0.25 ? sqrt(max(0.0, 1.0 - pow(clamp((bf + 0.25) / 1.25, 0.0, 1.0), 2.2))) : 1.0 - 0.22 * pow((-0.25 - bf) / 0.75, 2.0);
-  float inHull = step(-1.0, bf) * step(bf, 1.0);
-  float dH = abs(bs) - hw;
-  float bow = uBoatP.z * inHull * (1.0 - smoothstep(0.0, 0.42, abs(dH - 0.1))) * smoothstep(-0.9, 0.7, bf);
-  float st = uBoatP.w * (1.0 - smoothstep(0.0, 1.0, length(vec2((bf + 1.12) * 2.2, bs * 1.05))));
-  f = max(f, max(bow, st));
+  f = max(f, max(hullFoam(uBoat, uBoatP), hullFoam(uBoat2, uBoatP2)));
   gl_FragColor = vec4(f, f, f, 1.0);
 }
 `;

@@ -164,8 +164,8 @@ export function makeBody() {
   }
 
   // торс: dir — позвоночник от таза, shoulders — линия плеч, front — куда смотрит грудь, neck — куда идёт шея;
-  // hide — вид из глаз: всё выше плеч убирается
-  function torso(hip, dir, shoulders, hide, neck, front) {
+  // hide — вид из глаз: всё выше плеч убирается; arch — прогиб спины, м
+  function torso(hip, dir, shoulders, hide, neck, front, arch = 0.015) {
     perp(ax, shoulders, dir, front); az.crossVectors(ax, dir);
     if (az.dot(front) < 0) { ax.multiplyScalar(-1); az.multiplyScalar(-1); }
     for (const [v0, T] of [[torsoV, torsoT], [vestV, vestT]]) {
@@ -174,6 +174,8 @@ export function makeBody() {
         // вид из глаз: шея и воротник не рисуются, срез на уровне плеч
         const cut = hide && t > 0.455;
         O.copy(hip).addScaledVector(dir, Math.min(t, cut ? 0.455 : NECK_T)); if (t > NECK_T && !cut) O.addScaledVector(neck, t - NECK_T);
+        // спина не доска: поясница уходит назад, сильнее всего при откренивании
+        if (t > 0 && t < 0.46) O.addScaledVector(az, -arch * Math.sin(Math.PI * t / 0.46));
         for (let j = 0; j < ST; j++, k++, o += 3) {
           if (cut) { pos[o] = O.x; pos[o + 1] = O.y; pos[o + 2] = O.z; continue; }
           const x = X[k], z = Z[k];

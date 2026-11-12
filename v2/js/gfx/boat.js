@@ -423,7 +423,8 @@ export function createBoat(world, env, opts = {}) {
     }
   }
 
-  function update(state, out, ctl, dt, t, env) {
+  // lite — только положение корпуса и гика: так обновляются далёкие лодки соперников между полными кадрами
+  function update(state, out, ctl, dt, t, env, lite = false) {
     root.position.set(state.x, 0, state.z);
     root.rotation.y = Math.PI / 2 - state.heading * DEG;
     // Лодка идёт по волнам: высота и уклоны воды берутся из той же формулы, что рисует море
@@ -441,6 +442,7 @@ export function createBoat(world, env, opts = {}) {
 
     rig.rotation.y = state.boom * DEG;       // гик на правом борту при положительном угле
     windex.rotation.y = -out.AWA * DEG - rig.rotation.y;
+    if (lite) { rudderPivot.rotation.y = state.rudder * DEG; return; }
     updateSail(out, dt, state);
 
     // гика-шкот: погон → блок на ноке гика → погон → вдоль гика к среднему блоку → блок в кокпите
@@ -498,7 +500,8 @@ export function createBoat(world, env, opts = {}) {
   api.setSailor = (v) => { sailorOn = v; };
   api.setHead = (v) => { firstPerson = !v; sailor.setFirstPerson(!v); };
   // положение глаз матроса в осях лодки и перевод из осей лодки в мир
-  api.eyeLocal = (v) => v.copyFrom(headRoll.position);
+  // глаза впереди центра головы: так свои плечи остаются на краю зрения, а не посреди кадра
+  api.eyeLocal = (v) => { const y = headG.rotation.y; v.copyFrom(headRoll.position); v.x += Math.cos(y) * 0.075; v.z -= Math.sin(y) * 0.075; return v; };
   api.toWorld = (v, out) => B.Vector3.TransformCoordinatesToRef(v, hull.computeWorldMatrix(true), out);
   api.deckY = () => mastBase.y;
   return api;

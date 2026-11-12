@@ -7,35 +7,45 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0b0b0c">
 <title>Лазер 3D · версия 2 — Сила ветра</title>
-<meta name="description" content="Интерактивный 3D-тренажёр: ветер, парус, руль и курс швертбота класса Лазер.">
+<meta name="description" content="3D-тренажёр швертбота «Лазер»: ветер, парус, руль, 14 уроков и гонка со стартовой процедурой. Работает в браузере на телефоне и компьютере.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Сила ветра">
+<meta property="og:title" content="Лазер 3D: тренажёр парусной школы «Сила ветра»">
+<meta property="og:description" content="Учитесь управлять швертботом в браузере: настоящая физика паруса, 14 уроков, гонка со стартом по флагам и соперники на дистанции.">
+<meta property="og:url" content="https://klouner.github.io/laser-sailing-sim/v2/">
+<meta property="og:image" content="https://klouner.github.io/laser-sailing-sim/v2/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23121212'/%3E%3Cpath d='M9 20l11 12-11 12M24 20l11 12-11 12M39 20l11 12-11 12' fill='none' stroke='%23fff' stroke-width='6'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 <!-- Номер версии стоит у каждого модуля: после обновления сайта браузер не смешает новые файлы со старыми из кэша -->
 <script type="importmap">
 {
   "imports": {
-    "babylon": "./vendor/babylon.js?v=5",
-    "./js/analytics.js": "./js/analytics.js?v=5",
-    "./js/audio.js": "./js/audio.js?v=5",
-    "./js/config.js": "./js/config.js?v=5",
-    "./js/course.js": "./js/course.js?v=5",
-    "./js/env.js": "./js/env.js?v=5",
-    "./js/hud.js": "./js/hud.js?v=5",
-    "./js/leaderboard.js": "./js/leaderboard.js?v=5",
-    "./js/lessons.js": "./js/lessons.js?v=5",
-    "./js/physics.js": "./js/physics.js?v=5",
-    "./js/polar.js": "./js/polar.js?v=5",
-    "./js/fleet.js": "./js/fleet.js?v=5",
-    "./js/vec.js": "./js/vec.js?v=5",
-    "./js/gfx/world.js": "./js/gfx/world.js?v=5",
-    "./js/gfx/boat.js": "./js/gfx/boat.js?v=5",
-    "./js/gfx/view.js": "./js/gfx/view.js?v=5",
-    "./js/gfx/shaders.js": "./js/gfx/shaders.js?v=5",
-    "./js/gfx/scenery.js": "./js/gfx/scenery.js?v=5",
-    "./js/model/geo.js": "./js/model/geo.js?v=5",
-    "./js/model/body.js": "./js/model/body.js?v=5",
-    "./js/model/sailor.js": "./js/model/sailor.js?v=5"
+    "babylon": "./vendor/babylon.js?v=6",
+    "./js/analytics.js": "./js/analytics.js?v=6",
+    "./js/audio.js": "./js/audio.js?v=6",
+    "./js/config.js": "./js/config.js?v=6",
+    "./js/course.js": "./js/course.js?v=6",
+    "./js/env.js": "./js/env.js?v=6",
+    "./js/hud.js": "./js/hud.js?v=6",
+    "./js/leaderboard.js": "./js/leaderboard.js?v=6",
+    "./js/lessons.js": "./js/lessons.js?v=6",
+    "./js/physics.js": "./js/physics.js?v=6",
+    "./js/polar.js": "./js/polar.js?v=6",
+    "./js/fleet.js": "./js/fleet.js?v=6",
+    "./js/vec.js": "./js/vec.js?v=6",
+    "./js/gfx/world.js": "./js/gfx/world.js?v=6",
+    "./js/gfx/boat.js": "./js/gfx/boat.js?v=6",
+    "./js/gfx/view.js": "./js/gfx/view.js?v=6",
+    "./js/gfx/shaders.js": "./js/gfx/shaders.js?v=6",
+    "./js/gfx/scenery.js": "./js/gfx/scenery.js?v=6",
+    "./js/model/geo.js": "./js/model/geo.js?v=6",
+    "./js/model/body.js": "./js/model/body.js?v=6",
+    "./js/model/sailor.js": "./js/model/sailor.js?v=6"
   }
 }
 </script>
@@ -287,6 +297,6 @@
 
   <div id="loading"><div class="spinner"></div><div>Готовим лодку</div></div>
 </div>
-<script type="module" src="js/main.js?v=5"></script>
+<script type="module" src="js/main.js?v=6"></script>
 </body>
 </html>
