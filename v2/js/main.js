@@ -617,8 +617,9 @@ $('q-seg').addEventListener('click', (e) => {
 function showSky() { for (const b of $('sky-seg').children) b.classList.toggle('active', b.dataset.sky === prefs.sky); }
 $('sky-seg').addEventListener('click', (e) => { const k = e.target.dataset && e.target.dataset.sky; if (!k) return; prefs.sky = k; savePrefs(); world.setSky(k); showSky(); });
 $('soundOn').checked = prefs.sound;
-// соперники рисуются на среднем и высоком качестве: на слабом устройстве их лодки слишком дороги
-function syncFleet() { fleet.setEnabled(prefs.fleet !== false && QUALITY.fx >= 1); $('showFleet').checked = prefs.fleet !== false; }
+// Соперники видны на любом качестве и не пропадают, когда оно снижается само: на низком их парус, снасти и матрос
+// просто перестраиваются реже. Убрать их можно только галкой.
+function syncFleet() { fleet.setEnabled(prefs.fleet !== false); fleet.economy = QUALITY.fx < 1; $('showFleet').checked = prefs.fleet !== false; }
 $('showFleet').addEventListener('change', (e) => { prefs.fleet = e.target.checked; savePrefs(); syncFleet(); });
 $('soundOn').addEventListener('change', (e) => { prefs.sound = e.target.checked; savePrefs(); audio.setEnabled(prefs.sound); });
 $('showFps').checked = prefs.fps;
@@ -663,7 +664,7 @@ function simulate(dt) {
   spray.update(ctl.paused ? 0 : dt, e, fx.level >= 1);
   scenery.update(t, dt, state.x, state.z);
   fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused, state);
-  if (fleet.contact) { audio.thud(1.6); toast(`Касание с лодкой ${fleet.contact}` + (course.race.active ? ': по правилам это штрафной оборот' : ''), false, 3200); }
+  if (fleet.contact) { state.vf *= 0.8; audio.thud(1.6); toast(`Касание с лодкой ${fleet.contact}` + (course.race.active ? ': по правилам это штрафной оборот' : ''), false, 3200); }
   return out;
 }
 function frame() {

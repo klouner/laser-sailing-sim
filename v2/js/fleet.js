@@ -105,6 +105,7 @@ export function createFleet(world, env, n = 3) {
         // лодка, ушедшая далеко, возвращается на дистанцию
         if (Math.abs(b.state.x) > 160 || b.state.z > 120 || b.state.z < -220) put(b, -20 + 20 * b.i, 30, windFrom - 45, 'up', windFrom);
       }
+      b.touchNow = false;
       // корпуса не проходят друг сквозь друга: соперника отодвигает; касание с лодкой ученика сообщается наружу
       if (!paused) for (const o of others) {
         if (o === b.state || o.capsized > 0 || b.state.capsized > 0) continue;
@@ -112,14 +113,17 @@ export function createFleet(world, env, n = 3) {
         const g = hullGap(b.state, o);
         if (g.d < 1.25) {
           const push = (1.25 - g.d) * (o === player ? 1 : 0.5);
-          b.state.x += g.nx * push; b.state.z += g.nz * push; b.state.vf *= 0.97;
+          b.state.x += g.nx * push; b.state.z += g.nz * push;
+          if (!b.touching) b.state.vf *= 0.75;                         // удар гасит ход один раз, а не всё время, пока корпуса рядом
+          b.touchNow = true;
           if (o === player && t - contactAt > 5) { contactAt = t; api.contact = b.num; }
         }
       }
       const d = Math.hypot(b.state.x - player.x, b.state.z - player.z);
       if (d < nearD && !b.state.capsized) { nearD = d; near.x = b.state.x; near.z = b.state.z; near.fx = b.state.out.fx; near.fz = b.state.out.fz; near.speed = b.state.vf; api.wake = near; }
       // далёкие лодки перестраивают парус, снасти и матроса не каждый кадр
-      const every = d < 30 ? 1 : d < 80 ? 2 : 4, full = (frame + b.i) % every === 0;
+      b.touching = b.touchNow;
+      const every = api.economy ? (d < 30 ? 2 : 5) : (d < 30 ? 1 : d < 80 ? 2 : 4), full = (frame + b.i) % every === 0;
       b.gfx.update(b.state, b.state.out, b.ctl, paused ? 0 : dt + (full ? b.lagSum || 0 : 0), t, env, !full);
       b.lagSum = full ? 0 : (b.lagSum || 0) + dt;
     }
@@ -127,6 +131,6 @@ export function createFleet(world, env, n = 3) {
   function setEnabled(v) { enabled = v; for (const b of boats) b.gfx.root.setEnabled(v); }
   // первый кадр: у лодок должен быть посчитан state.out
   for (const b of boats) step(b.state, b.ctl, PHYS_DT, null);
-  const api = { boats, update, setEnabled, wake: null, contact: null, get enabled() { return enabled; } };
+  const api = { boats, update, setEnabled, wake: null, contact: null, economy: false, get enabled() { return enabled; } };
   return api;
 }
