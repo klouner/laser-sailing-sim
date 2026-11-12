@@ -296,6 +296,7 @@ function handleKeys(dt) {
 
 // ---------- тренировка: уроки, гонка, рекорды ----------
 let toastTimer = 0, capUI = false;
+const COARSE = matchMedia('(pointer: coarse)').matches;      // телефон или планшет: клавиш нет, в подсказках называются кнопки
 function toast(text, big = false, ms = 2200) {
   const el = $('toast'); el.textContent = text; el.className = 'toast' + (big ? ' big' : ''); el.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms);
@@ -515,7 +516,7 @@ function updateUI(out, dt) {
   // подсказка меняется не чаще, чем раз в 0.6 с, чтобы не мигала при быстрых действиях
   if (out.hint !== updateUI.pendingHint) { updateUI.pendingHint = out.hint; updateUI.pendingSince = performance.now(); }
   if (out.hint !== updateUI.shownHint && performance.now() - updateUI.pendingSince > 600) {
-    updateUI.shownHint = out.hint; const hint = el('hint'); hint.textContent = out.hint; hint.className = 'hint ' + out.hintClass;
+    updateUI.shownHint = out.hint; const hint = el('hint'); hint.textContent = COARSE ? out.hint.replace(/ \((G|T)\)/g, '').replace('вставайте на шверт', 'жмите «На шверт»').replace('Вставайте на шверт', 'Жмите «На шверт»').replace('разверните нос к ветру', 'нажмите «На шверт» один раз: матрос развернёт нос к ветру') : out.hint; hint.className = 'hint ' + out.hintClass;
   }
 
   setText('s-speed', `${fmt(out.speedKn)} уз`);
