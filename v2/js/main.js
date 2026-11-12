@@ -58,6 +58,7 @@ const boat = createBoat(world, env);
 const spray = createSpray(world, env);
 const sprayE = { x: 0, z: 0, fx: 0, fz: -1, sx: 1, sz: 0, vx: 0, vz: 0, heave: 0, sf: 0, speed: 0 };
 const labels = createLabels(world, $('labels'));
+const occ = labels.occluders;
 const compassL = ['С', 'В', 'Ю', 'З'].map((n) => labels.add('wl-c', n));
 const noGoL = labels.add('wl-nogo', 'МЁРТВАЯ ЗОНА'), windL = labels.add('wl-wind', 'ВЕТЕР');
 
@@ -716,6 +717,10 @@ function frame() {
   noGoL.on = show.noGo && ringOn; noGoL.set(state.x + Math.sin(ng) * R * 0.74, ly, state.z - Math.cos(ng) * R * 0.74);
   windL.on = ringOn; windL.set(state.x + Math.sin(wf) * (R + 2.95), ly + 0.1, state.z - Math.cos(wf) * (R + 2.95));
   world.render();
+  // подписи прячутся за судейским катером и лодками соперников
+  occ.length = 0;
+  if (course.group.visible) { const o = course.obstacle; occ.push({ x: o.x, z: o.z, heading: o.heading, hl: 4.9, hw: 1.5, y0: -1, y1: 3.4 }); }
+  if (fleet.enabled) for (const b of fleet.boats) occ.push({ x: b.state.x, z: b.state.z, heading: b.state.heading, hl: 2.2, hw: 0.75, y0: -1, y1: 1.1 });
   labels.update();
 }
 

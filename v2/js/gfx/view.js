@@ -94,10 +94,29 @@ export function createLabels(world, layer) {
     it.setText = (t) => { if (t !== it.text) { it.text = t; el.textContent = t; } };
     items.push(it); return it;
   }
+  // Подпись не рисуется, если её точка внутри чужого корпуса или за ним: иначе она ложится на него как наклейка.
+  // Препятствия — коробки: { x, z, heading (град), hl, hw (полудлина и полуширина), y0, y1 }.
+  const api = { add, update, occluders: [] };
+  function hidden(it) {
+    const c = world.camera.position;
+    for (const o of api.occluders) {
+      const a = o.heading * Math.PI / 180, fx = Math.sin(a), fz = -Math.cos(a);
+      const p0 = [(c.x - o.x) * fx + (c.z - o.z) * fz, c.y, (c.x - o.x) * -fz + (c.z - o.z) * fx], p1 = [(it.x - o.x) * fx + (it.z - o.z) * fz, it.y, (it.x - o.x) * -fz + (it.z - o.z) * fx];
+      const lo = [-o.hl, o.y0, -o.hw], hi = [o.hl, o.y1, o.hw]; let t0 = 0, t1 = 1, hit = true;
+      for (let k = 0; k < 3 && hit; k++) {
+        const d = p1[k] - p0[k];
+        if (Math.abs(d) < 1e-9) { if (p0[k] < lo[k] || p0[k] > hi[k]) hit = false; continue; }
+        let a0 = (lo[k] - p0[k]) / d, a1 = (hi[k] - p0[k]) / d; if (a0 > a1) { const q = a0; a0 = a1; a1 = q; }
+        t0 = Math.max(t0, a0); t1 = Math.min(t1, a1); if (t0 > t1) hit = false;
+      }
+      if (hit) return true;
+    }
+    return false;
+  }
   function update() {
     const w = layer.clientWidth, h = layer.clientHeight, tm = world.scene.getTransformMatrix();
     for (const it of items) {
-      let vis = it.on;
+      let vis = it.on && !(api.occluders.length && hidden(it));
       if (vis) {
         B.Vector3.ProjectToRef(p.set(it.x, it.y, it.z), ident, tm, vp, out);
         vis = out.z > 0 && out.z < 1 && out.x > -0.1 && out.x < 1.1 && out.y > -0.1 && out.y < 1.1;
@@ -106,7 +125,7 @@ export function createLabels(world, layer) {
       if (vis !== it.shown) { it.shown = vis; it.el.style.display = vis ? '' : 'none'; }
     }
   }
-  return { add, update };
+  return api;
 }
 
 // ---------- стрелка вектора ----------

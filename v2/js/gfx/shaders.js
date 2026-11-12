@@ -150,7 +150,14 @@ void main() {
   vec2 q2 = vec2(r.x * 0.8 - r.y * 0.6, r.x * 0.6 + r.y * 0.8);
   vec3 d1 = texture2D(uNormalTex, r * 0.105 + uRipple.xy).xyz * 2.0 - 1.0;
   vec3 d2 = texture2D(uNormalTex, q2 * 0.41 + uRipple.zw).xyz * 2.0 - 1.0;
-  float rip = (0.2 + 0.75 * smoothstep(1.0, 16.0, uSea.z)) * (1.0 + 0.7 * gP - 0.55 * gL);
+  // кильватерный след: значение из текстуры пены нужно раньше всего остального, по нему гладится рябь
+  float wake = 0.0;
+  if (uFoamWin.w > 0.5) {
+    vec2 fw = (vW.xz - uFoamWin.xy) / uFoamWin.z + 0.5;
+    if (fw.x > 0.0 && fw.x < 1.0 && fw.y > 0.0 && fw.y < 1.0) wake = texture2D(uFoamTex, fw).r;
+  }
+  float trail = smoothstep(0.015, 0.2, wake);                      // взбаламученная вода за кормой: гладкая и светлая
+  float rip = (0.2 + 0.75 * smoothstep(1.0, 16.0, uSea.z)) * (1.0 + 0.7 * gP - 0.55 * gL) * (1.0 - 0.72 * trail);
   vec3 d3 = texture2D(uNormalTex, vec2(r.y, -r.x) * 1.37 + uRipB.xy).xyz * 2.0 - 1.0;
   float near = 1.0 / (1.0 + dist * 0.06);
   vec2 dn = (d1.xy * 0.6 + d2.xy * 0.52 + d3.xy * 0.34 * near) * rip;
@@ -195,6 +202,7 @@ void main() {
   float back = pow(max(dot(V, -normalize(vec3(uSunDir.x, 0.0, uSunDir.z))), 0.0), 2.0);
   vec3 body = uDeep * (0.5 + 0.5 * sunUp) + uScatter * (0.05 + 0.5 * crest * crest * (0.25 + 0.75 * back) * chop) * sunUp * (0.55 + 0.45 * lit);
   body *= (1.0 - 0.3 * gP) * (1.0 + 0.12 * gL);
+  body += uScatter * (0.22 * trail) * sunUp;                       // в следу вода с пузырьками: светлее и зеленее
 
   vec3 col = mix(body, refl * (1.0 - 0.22 * gP), fres) + sun;
 
@@ -206,7 +214,7 @@ void main() {
   if (uFoamWin.w > 0.5) {
     vec2 fu = (vW.xz - uFoamWin.xy) / uFoamWin.z + 0.5;
     if (fu.x > 0.0 && fu.x < 1.0 && fu.y > 0.0 && fu.y < 1.0) {
-      float wf = texture2D(uFoamTex, fu).r;
+      float wf = wake;
       // пена рвётся шумом двух масштабов: у кормы плотная, дальше распадается на клочья
       float nf = texture2D(uNoise, r * 1.7 + uRipC.zw).b;
       foam = max(foam, smoothstep(0.3, 0.78, wf * (0.35 + 0.9 * nz + 0.55 * nf) + wf * wf * 0.35 - nz2 * 0.16) * 0.92);
@@ -222,7 +230,7 @@ void main() {
     float streak = smoothstep(0.6, 0.8, lane) * smoothstep(0.42, 0.7, lane2) * (0.45 + 0.55 * fine) * smoothstep(4.0, 12.0, uSea.z);
     float fleck = smoothstep(0.78, 0.92, texture2D(uNoise, vec2(ac * 0.19 + 0.21, al * 0.05)).r) * (0.45 + 0.55 * fine);      // клочья пены, вытянутые по ветру
     float farK = 1.0 / (1.0 + dist * dist * 0.00012);
-    foam = max(foam, (streak * 0.25 + fleck * 0.34) * farK);
+    foam = max(foam, (streak * 0.25 + fleck * 0.34) * farK * (1.0 - 0.8 * trail));
   }
   vec3 foamCol = (uSunCol * 0.34 * max(uSunDir.y, 0.1) * (0.35 + 0.65 * lit) + uHorizon * 0.45);
   col = mix(col, foamCol, foam);

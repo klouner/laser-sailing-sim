@@ -26,6 +26,7 @@ export function createCourse(world, env) {
   const pin = makeMark(world, ORANGE); pin.node.position.set(COURSE.gate[0].x, 0, COURSE.gate[0].z);
   // катер стоит на якоре носом к ветру; линия идёт от знака к его мачте с оранжевым флагом
   const rc = makeCommittee(world); rc.node.position.set(COURSE.gate[1].x + 1.5, 0, COURSE.gate[1].z + 0.35);
+  rc.node.rotation.y = Math.PI / 2;                 // до первого кадра: носом на север
   const marks3d = [mW, pin, rc];
   const hl = { which: null };
   const obstacle = { x: 0, z: 0, heading: 0, capsized: 0, big: true };      // катер как препятствие для соперников
@@ -79,6 +80,8 @@ export function createCourse(world, env) {
         m.bob.position.y = h0 * 0.85;
         m.bob.rotation.z = (env.heightAt(bx + 0.6, bz, m.waveL || 3) - h0) * k; m.bob.rotation.x = -(env.heightAt(bx, bz + 0.6, m.waveL || 3) - h0) * k;
       }
+      // катер стоит на якоре и сам разворачивается носом к ветру
+      { const want = Math.PI / 2 - ctl.windFrom * Math.PI / 180; let da = want - rc.node.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da)); rc.node.rotation.y += da * Math.min(1, dt * 0.6); }
       rc.setFlags(race.flags, t, ctl.windFrom);
       // навал на судейский катер: его корпус не пускает лодку, удар гасит ход
       const a = rc.node.rotation.y, ax = Math.cos(a), az = -Math.sin(a), dx = state.x - rc.node.position.x, dz = state.z - rc.node.position.z;

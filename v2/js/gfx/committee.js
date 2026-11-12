@@ -72,6 +72,7 @@ export function makeCommittee(world) {
     const c0 = pos.length / 3; pos.push(-L / 2, 0.4, 0); col.push(NAVY[0], NAVY[1], NAVY[2], 1);
     const t0 = pos.length / 3; for (let j = 0; j < NR; j++) { pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]); const c = rows[0][j][3]; col.push(c[0], c[1], c[2], 1); }
     for (let j = 0; j < NR - 1; j++) idx.push(c0, t0 + j, t0 + j + 1);
+    idx.push(c0, t0 + NR - 1, t0);                                   // верхний клин транца: от планширя до планширя
     // палуба: настил чуть ниже планширя
     const d0 = pos.length / 3;
     for (let i = 0; i <= NXh; i++) { const s = st(i / NXh), y = s.sheer - 0.07; for (const z of [-0.97, 0.97]) { pos.push(s.x, y, s.hw * z); col.push(TEAK[0], TEAK[1], TEAK[2], 1); } }

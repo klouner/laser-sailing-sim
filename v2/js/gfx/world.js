@@ -260,16 +260,17 @@ export function createWorld(canvas, { antialias = true } = {}) {
     if (Math.abs(sx) > 0.5 || Math.abs(sz) > 0.5) { sx = 2; sz = 2; }        // лодку переставили: след стирается
     foam.cx = cx; foam.cz = cz; foam.shift.set(sx, sz);
     // два шага симуляции за кадр: затухание и размытие поделены пополам
-    const life = 5.5, decay = dt > 0 ? Math.exp(-dt / life / 2) : 1;
-    foam.step.set(decay, dt > 0 ? 0.0012 : 0, dt > 0 ? 0.11 : 0, 1 / FOAM_RES);
+    // след живёт около двенадцати секунд; затухание и расплывание считаются от времени, а не от числа кадров
+    const life = 12, decay = dt > 0 ? Math.exp(-dt / life / 2) : 1;
+    foam.step.set(decay, dt * 0.012, Math.min(0.2, dt * 5), 1 / FOAM_RES);
     const sp = f.capsized ? 0 : Math.abs(f.speed);
     foam.boat.set((f.x - cx) / FOAM_SIZE + 0.5, (f.z - cz) / FOAM_SIZE + 0.5, f.fx, f.fz);
     const bow = Math.min(1, Math.max(0, (sp - 0.8) / 2.6)), stern = Math.min(1, Math.max(0, (sp - 0.4) / 2.2));
-    foam.boatP.set(2.12 / FOAM_SIZE, 0.7 / FOAM_SIZE, dt > 0 ? bow * 0.7 : 0, dt > 0 ? stern * 0.55 : 0);
+    foam.boatP.set(2.12 / FOAM_SIZE, 0.7 / FOAM_SIZE, dt > 0 ? bow * 0.8 : 0, dt > 0 ? stern * 0.95 : 0);
     // след ближайшего соперника, если он в окне пены
     const w2 = f.wake2, sp2 = w2 ? Math.abs(w2.speed) : 0;
     if (w2) foam.boat2.set((w2.x - cx) / FOAM_SIZE + 0.5, (w2.z - cz) / FOAM_SIZE + 0.5, w2.fx, w2.fz); else foam.boat2.set(9, 9, 1, 0);
-    foam.boatP2.set(2.12 / FOAM_SIZE, 0.7 / FOAM_SIZE, w2 && dt > 0 ? Math.min(1, Math.max(0, (sp2 - 0.8) / 2.6)) * 0.7 : 0, w2 && dt > 0 ? Math.min(1, Math.max(0, (sp2 - 0.4) / 2.2)) * 0.55 : 0);
+    foam.boatP2.set(2.12 / FOAM_SIZE, 0.7 / FOAM_SIZE, w2 && dt > 0 ? Math.min(1, Math.max(0, (sp2 - 0.8) / 2.6)) * 0.8 : 0, w2 && dt > 0 ? Math.min(1, Math.max(0, (sp2 - 0.4) / 2.2)) * 0.95 : 0);
     for (const t of [foamA, foamB]) { t.setColor4('uStep', foam.step); t.setColor4('uBoat', foam.boat); t.setColor4('uBoatP', foam.boatP); t.setColor4('uBoat2', foam.boat2); t.setColor4('uBoatP2', foam.boatP2); }
     foamA.setVector2('uShift', foam.shift); foamB.setVector2('uShift', foam.zero);
     U.foamWin.set(cx, cz, FOAM_SIZE, state.fx.foam ? 1 : 0); oceanMat.setVector4('uFoamWin', U.foamWin);
