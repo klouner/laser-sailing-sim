@@ -212,7 +212,7 @@ export function createWorld(canvas, { antialias = true } = {}) {
   }
 
   // ---- кадр ----
-  const U = { compass: new B.Vector4(0, 0, 3.6, 1), windMark: new B.Vector4(0, -1, 1, 1), ripple: new B.Vector4(), line: new B.Vector4(), foamWin: new B.Vector4(), sea: new B.Vector4(), fx: new B.Vector4(1, 1, 0, 0), screen: new B.Vector2(1, 1), cloud: new B.Vector3(), pivot: new B.Vector2(), fwd: new B.Vector2(), plane: new B.Vector3() };
+  const U = { compass: new B.Vector4(0, 0, 3.6, 1), windMark: new B.Vector4(0, -1, 1, 1), ripple: new B.Vector4(), ripB: new B.Vector4(), ripC: new B.Vector4(), line: new B.Vector4(), foamWin: new B.Vector4(), sea: new B.Vector4(), fx: new B.Vector4(1, 1, 0, 0), screen: new B.Vector2(1, 1), cloud: new B.Vector3(), pivot: new B.Vector2(), fwd: new B.Vector2(), plane: new B.Vector3() };
   const marks = new Array(16).fill(0), markCol = new Array(16).fill(0);
   let ripT = 0;
   // f: { dt, paused, x, z, fx, fz, speed, capsized, windFrom (град), windKn, compass 0..1, noGo, arrow, marks: [{x,z,r,a,color:[r,g,b]}] }
@@ -235,6 +235,11 @@ export function createWorld(canvas, { antialias = true } = {}) {
     const px = env.pivotX, pz = env.pivotZ, k1 = ripT * 0.05, k2 = ripT * 0.21;
     U.ripple.set((px * 0.105 + wx * k1) % 1, (pz * 0.105 + wz * k1) % 1, ((px * 0.8 - pz * 0.6) * 0.41 + (wx * 0.8 - wz * 0.6) * k2) % 1, ((px * 0.6 + pz * 0.8) * 0.41 + (wx * 0.6 + wz * 0.8) * k2) % 1);
     oceanMat.setVector4('uRipple', U.ripple);
+    // третий слой ряби и шумы пены: у каждого свой масштаб и поворот, поэтому и сдвиг опорной точки у каждого свой
+    const rx = wx * 0.8 - wz * 0.6, rz = wx * 0.6 + wz * 0.8, k3 = ripT * 0.33;
+    U.ripB.set((pz * 1.37 + wz * k3) % 1, (-px * 1.37 - wx * k3) % 1, (px * 0.31 + wx * k1 * 2) % 1, (pz * 0.31 + wz * k1 * 2) % 1);
+    U.ripC.set(((px * 0.8 - pz * 0.6) * 0.9 - rx * k2) % 1, ((px * 0.6 + pz * 0.8) * 0.9 - rz * k2) % 1, (px * 1.7 + rx * k2) % 1, (pz * 1.7 + rz * k2) % 1);
+    oceanMat.setVector4('uRipB', U.ripB); oceanMat.setVector4('uRipC', U.ripC); oceanMat.setFloat('uDriftT', ripT * 0.35);
     U.sea.set(env.whitecap, env.gustOn, f.windKn, env.ampTotal); oceanMat.setVector4('uSea', U.sea);
     oceanMat.setVector3('uCam', camera.position);
     U.screen.set(engine.getRenderWidth(), engine.getRenderHeight()); oceanMat.setVector2('uScreen', U.screen);

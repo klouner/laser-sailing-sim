@@ -1,6 +1,7 @@
 // Трасса: наветренный знак и линия старта и финиша между знаком и судейским катером. Гонка со стартовой процедурой.
 // Сами знаки рисует js/gfx/view.js; кольца и финишная линия рисуются прямо на воде в шейдере океана.
-import { makeMark, makeCommittee } from './gfx/view.js';
+import { makeMark } from './gfx/view.js';
+import { makeCommittee } from './gfx/committee.js';
 import { settleRig } from './physics.js';
 
 export const COURSE = {
@@ -24,9 +25,10 @@ export function createCourse(world, env) {
   const mW = makeMark(world, ORANGE); mW.node.position.set(COURSE.windward.x, 0, COURSE.windward.z);
   const pin = makeMark(world, ORANGE); pin.node.position.set(COURSE.gate[0].x, 0, COURSE.gate[0].z);
   // катер стоит на якоре носом к ветру; линия идёт от знака к его мачте с оранжевым флагом
-  const rc = makeCommittee(world); rc.node.position.set(COURSE.gate[1].x + 1.25, 0, COURSE.gate[1].z + 0.6);
+  const rc = makeCommittee(world); rc.node.position.set(COURSE.gate[1].x + 1.5, 0, COURSE.gate[1].z + 0.35);
   const marks3d = [mW, pin, rc];
   const hl = { which: null };
+  const obstacle = { x: 0, z: 0, heading: 0, capsized: 0, big: true };      // катер как препятствие для соперников
   const group = { _v: false, get visible() { return this._v; }, set visible(v) { this._v = v; for (const m of marks3d) m.setEnabled(v); } };
   group.visible = false;
 
@@ -78,6 +80,11 @@ export function createCourse(world, env) {
         m.bob.rotation.z = (env.heightAt(bx + 0.6, bz, m.waveL || 3) - h0) * k; m.bob.rotation.x = -(env.heightAt(bx, bz + 0.6, m.waveL || 3) - h0) * k;
       }
       rc.setFlags(race.flags, t, ctl.windFrom);
+      // навал на судейский катер: его корпус не пускает лодку, удар гасит ход
+      const a = rc.node.rotation.y, ax = Math.cos(a), az = -Math.sin(a), dx = state.x - rc.node.position.x, dz = state.z - rc.node.position.z;
+      const u = Math.max(-3.7, Math.min(3.7, dx * ax + dz * az)), nx = dx - ax * u, nz = dz - az * u, d = Math.hypot(nx, nz), R = 2.05;
+      obstacle.x = rc.node.position.x; obstacle.z = rc.node.position.z; obstacle.heading = 90 - a * 180 / Math.PI;
+      if (d < R && !(state.capsized > 0)) { const k = (R - d) / (d || 1); state.x += nx * k; state.z += nz * k; if (!api.touching) { state.vf *= 0.4; api.hit = true; } api.touching = true; } else api.touching = false;
     }
     if (!race.active) return null;
     let event = null;
@@ -136,6 +143,7 @@ export function createCourse(world, env) {
     return event;
   }
 
-  return { group, race, start, stop, update, showCourse, marks3d, overlay,
+  const api = { group, race, start, stop, update, showCourse, marks3d, overlay, obstacle, hit: false, touching: false,
     marks: { W: COURSE.windward, L: COURSE.finish, G1: COURSE.gate[0], G2: COURSE.gate[1] } };
+  return api;
 }

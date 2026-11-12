@@ -664,7 +664,8 @@ function simulate(dt) {
   e.heave = boat.sea.heave; e.sf = boat.sea.sf; e.speed = out.capsized ? 0 : Math.max(0, state.vf);
   spray.update(ctl.paused ? 0 : dt, e, fx.level >= 1);
   scenery.update(t, dt, state.x, state.z);
-  fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused, state);
+  fleet.update(dt, t, ctl.windFrom, ctl.windSpeed, course.race, ctl.paused, state, course.group.visible ? course.obstacle : null);
+  if (course.hit) { course.hit = false; audio.thud(2.2); toast('Навал на судейский катер' + (course.race.active ? ': это нарушение, штрафной оборот' : ''), false, 3200); }
   if (fleet.contact) { state.vf *= 0.8; audio.thud(1.6); toast(`Касание с лодкой ${fleet.contact}` + (course.race.active ? ': по правилам это штрафной оборот' : ''), false, 3200); }
   return out;
 }

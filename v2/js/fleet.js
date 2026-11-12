@@ -88,10 +88,10 @@ export function createFleet(world, env, n = 3) {
   const others = [], near = { x: 0, z: 0, fx: 0, fz: 1, speed: 0 };
   let frame = 0, contact = null, contactAt = -99;
   // race — состояние гонки из course.js; player — состояние лодки ученика
-  function update(dt, t, windFrom, windKn, race, paused, player) {
+  function update(dt, t, windFrom, windKn, race, paused, player, obstacle) {
     api.wake = null; api.contact = null;
     if (!enabled) return;
-    frame++; others.length = 0; others.push(player); for (const b of boats) others.push(b.state);
+    frame++; others.length = 0; others.push(player); for (const b of boats) others.push(b.state); if (obstacle) others.push(obstacle);
     let nearD = 24;
     const racing = !!(race && race.active);
     if (racing && race.phase === 'prestart' && !wasRace) prestart(windFrom);
@@ -109,10 +109,10 @@ export function createFleet(world, env, n = 3) {
       // корпуса не проходят друг сквозь друга: соперника отодвигает; касание с лодкой ученика сообщается наружу
       if (!paused) for (const o of others) {
         if (o === b.state || o.capsized > 0 || b.state.capsized > 0) continue;
-        if (Math.abs(o.x - b.state.x) > 6 || Math.abs(o.z - b.state.z) > 6) continue;
-        const g = hullGap(b.state, o);
-        if (g.d < 1.25) {
-          const push = (1.25 - g.d) * (o === player ? 1 : 0.5);
+        if (Math.abs(o.x - b.state.x) > 8 || Math.abs(o.z - b.state.z) > 8) continue;
+        const g = hullGap(b.state, o), lim = o.big ? 2.3 : 1.25;
+        if (g.d < lim) {
+          const push = (lim - g.d) * (o === player ? 1 : o.big ? 1 : 0.5);
           b.state.x += g.nx * push; b.state.z += g.nz * push;
           if (!b.touching) b.state.vf *= 0.75;                         // удар гасит ход один раз, а не всё время, пока корпуса рядом
           b.touchNow = true;
