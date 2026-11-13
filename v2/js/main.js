@@ -24,10 +24,13 @@ const canvas = $('scene');
 const isTouch = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
 // Уровни качества. fx: 0 — без эффектов, 1 — брызги и пена, 2 — ещё и отражение лодки в воде.
 const DEVICE_DPR = window.devicePixelRatio || 1;
+// Плотность отрисовки: сколько точек картинки на одну точку вёрстки. На плотных экранах (телефон, планшет)
+// она выше и ниже своего предела не опускается: иначе всё мелкое, особенно лодки вдали, превращается в кашу.
+const DENSE = DEVICE_DPR >= 2;
 const LEVELS = {
-  low: { maxDpr: Math.min(DEVICE_DPR, 1), minDpr: 0.75, shadow: 512, fx: 0 },
-  med: { maxDpr: Math.min(DEVICE_DPR, 1.5), minDpr: 1, shadow: 1024, fx: 1 },
-  high: { maxDpr: Math.min(DEVICE_DPR, 2), minDpr: 1, shadow: 2048, fx: 2 },
+  low: { maxDpr: Math.min(DEVICE_DPR, DENSE ? 1.5 : 1), minDpr: Math.min(DEVICE_DPR, DENSE ? 1.25 : 0.85), shadow: 512, fx: 0 },
+  med: { maxDpr: Math.min(DEVICE_DPR, DENSE ? 2 : 1.5), minDpr: Math.min(DEVICE_DPR, DENSE ? 1.5 : 1), shadow: 1024, fx: 1 },
+  high: { maxDpr: Math.min(DEVICE_DPR, DENSE ? 2.5 : 2), minDpr: Math.min(DEVICE_DPR, DENSE ? 1.75 : 1), shadow: 2048, fx: 2 },
 };
 const LEVEL_NAME = { low: 'низкое', med: 'среднее', high: 'высокое' };
 const prefs = { quality: 'auto', fps: false, sound: true, sky: 'morning', fleet: true };
@@ -45,7 +48,7 @@ let QUALITY = LEVELS[level];
 // сглаживание задаётся один раз при создании контекста; остальное меняется на лету
 const world = createWorld(canvas, { antialias: level !== 'low' && !(isTouch && DEVICE_DPR >= 2) });
 let dpr = QUALITY.maxDpr;
-world.engine.setHardwareScalingLevel(1 / dpr);
+world.engine.setHardwareScalingLevel(1 / dpr); world.setUpscaled(dpr < DEVICE_DPR - 0.3);
 const scenery = createScenery(world);
 if (!SKIES[prefs.sky]) prefs.sky = 'morning';
 world.setSky(prefs.sky);
@@ -464,7 +467,7 @@ function updateTraining(out, dt, t) {
   } else course.update(state, ctl, dt, t);       // знаки качаются на волне, флаги полощут
 }
 // отладочный доступ: состояние и перемотка времени (используется автотестами)
-window.__sim = { fleet, scenery, get level() { return level; }, prefs, stats, world, camera, get rig() { return rig; }, setCamera, boat, audio, get look() { return rig.look; }, state, ctl, course, lessons, startRace, startLesson, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
+window.__sim = { forceDpr: (v) => { perf.frozen = true; dpr = v; layoutDirty = true; }, fleet, scenery, get level() { return level; }, prefs, stats, world, camera, get rig() { return rig; }, setCamera, boat, audio, get look() { return rig.look; }, state, ctl, course, lessons, startRace, startLesson, env, get dpr() { return dpr; }, warp: (sec) => { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) simulate(1 / 60); } };
 
 // ---------- камера ----------
 const rig = createCameraRig(world, canvas, boat);
@@ -573,7 +576,7 @@ function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return;
   if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
-    world.engine.setHardwareScalingLevel(1 / dpr); world.engine.resize();
+    world.engine.setHardwareScalingLevel(1 / dpr); world.engine.resize(); world.setUpscaled(dpr < DEVICE_DPR - 0.3);
     lastOffsetY = null;            // смещение кадра зависит от размера — пересчитать
   }
   camera.fov = baseFov() * DEG;
@@ -596,17 +599,30 @@ function showFps() {
   const el = $('fps'); el.hidden = !prefs.fps;
   if (prefs.fps) setText('fps', `${Math.round(perf.fps)} к/с · ${LEVEL_NAME[level]} · ×${dpr}`);
 }
+// Подстройка под устройство. Сначала пробуется меньшая плотность. Если кадров от этого не прибавилось,
+// значит, узкое место не видеокарта: плотность возвращается, а дальше снимаются только эффекты.
 function adaptQuality(rawDt) {
-  if (document.hidden || rawDt > 0.25) return;      // вкладка была свёрнута — не считаем
+  if (document.hidden || rawDt > 0.25 || perf.frozen) return;      // вкладка была свёрнута — не считаем
   perf.acc += rawDt; perf.n++;
   if (perf.acc < 1) return;
   const avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0; perf.fps = 1 / avg;
+  if (perf.probe) {                                    // проверка: помогло ли снижение плотности
+    if (++perf.probe.t >= 2) {
+      if (perf.fps < perf.probe.fps * 1.12) { dpr = perf.probe.from; perf.cap = dpr; perf.noRes = true; layoutDirty = true; }
+      perf.probe = null; perf.slow = 0; perf.fast = 0;
+    }
+    if (prefs.fps) showFps();
+    return;
+  }
   if (avg > 1 / 42) { perf.slow++; perf.fast = 0; } else if (avg < 1 / 56) { perf.fast++; perf.slow = 0; } else { perf.slow = 0; perf.fast = 0; }
-  if (perf.slow >= 2 && dpr > QUALITY.minDpr) {
+  if (perf.slow >= 2 && dpr > QUALITY.minDpr && !perf.noRes) {
+    perf.probe = { fps: perf.fps, from: dpr, t: 0 };
     perf.cap = Math.min(perf.cap, dpr);              // выше этого уровня больше не поднимаемся без долгого запаса
     dpr = Math.max(QUALITY.minDpr, +(dpr - 0.25).toFixed(2)); perf.slow = 0; layoutDirty = true;
   } else if (perf.slow >= 4 && prefs.quality === 'auto' && level !== 'low') {
-    setLevel(level === 'high' ? 'med' : 'low');      // плотность уже минимальная, а кадров мало: снимаем эффекты
+    const keep = perf.noRes;
+    setLevel(level === 'high' ? 'med' : 'low');      // плотность уже на пределе, а кадров мало: снимаем эффекты
+    perf.noRes = keep;
   } else if (perf.fast >= 8 && dpr < perf.cap - 0.01) {
     dpr = Math.min(perf.cap, +(dpr + 0.25).toFixed(2)); perf.fast = 0; layoutDirty = true;
   }

@@ -287,12 +287,18 @@ export function createWorld(canvas, { antialias = true } = {}) {
 
   // Уровень эффектов: 0 — без отражения, пены и свечения; 1 — пена, свечение, тень на воде; 2 — ещё и отражение лодки
   function setEffects(level, shadowSize) {
-    state.fx.mirror = level >= 2; state.fx.foam = level >= 1; state.fx.shadow = level >= 1; state.fx.bloom = level >= 1;
+    state.fx.mirror = level >= 2; state.fx.foam = true; state.fx.shadow = level >= 1; state.fx.bloom = level >= 1;      // след на воде нужен на любом качестве: он недорог
     pipeline.bloomEnabled = state.fx.bloom;
     mirror.refreshRate = state.fx.mirror ? 1 : 0; shadowMask.refreshRate = state.fx.shadow ? 1 : 0;
     foamA.refreshRate = foamB.refreshRate = state.fx.foam ? 1 : 0;
     if (shadowSize && shadowGen.mapSize !== shadowSize) shadowGen.mapSize = shadowSize;
   }
 
-  return { B, engine, scene, camera, skyMats, sun, sunDir, shadowGen, pipeline, ocean, oceanMat, skyDome, mirror, shadowMask, noiseTex, state, setSky, addBoatMesh, update, setEffects, render: () => scene.render() };
+  // Картинка рисуется мельче экрана и растягивается: сглаживание краёв тогда только мылит. Вместо него — лёгкая резкость.
+  function setUpscaled(v) {
+    if (state.upscaled === v) return; state.upscaled = v;
+    pipeline.fxaaEnabled = !v;
+    try { pipeline.sharpenEnabled = v; if (v) { pipeline.sharpen.edgeAmount = 0.22; pipeline.sharpen.colorAmount = 1; } } catch (e) { pipeline.fxaaEnabled = true; }
+  }
+  return { B, engine, scene, camera, skyMats, setUpscaled, sun, sunDir, shadowGen, pipeline, ocean, oceanMat, skyDome, mirror, shadowMask, noiseTex, state, setSky, addBoatMesh, update, setEffects, render: () => scene.render() };
 }
