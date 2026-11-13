@@ -113,7 +113,8 @@ export function createState() {
     flop: -10,             // когда лодку перебросило при подъёме мачтой на ветер
     capsizes: 0,           // сколько раз подряд лодка легла
     rt: 0, rtSide: 0, rtT: 0, rtGain: 0,   // поворот с перекатом: фаза, с какого галса, таймер
-    lastGybe: { time: -1, kick: 0 }, // последний удар гика
+    lastGybe: { time: -1, kick: 0, crossed: false }, // последний удар гика в шкот и был ли это перелёт с борта на борт
+    stopSide: 1,           // на каком борту гик в последний раз упирался в шкот
     gust: { speed: 0, dir: 0, seed: Math.random() * 1000 },
     time: 0,
     out: {},
@@ -169,7 +170,7 @@ export function settleRig(state, ctl) {
   state.boom = -state.side * Math.min(ctl.sheet, Math.abs(twa)); state.boomRate = 0;
   state.crewY = state.side * 0.5; state.heelMoment = 0; state.depower = 0; state.taut = 1;
   state.heel = 0; state.rollRate = 0; state.yawRate = 0; state.vs = 0;
-  state.rudder = 0; state.capsized = 0; state.righting = 0; state.rt = 0; state.lastGybe = { time: -1, kick: 0 }; state.rollAmp = 0;
+  state.rudder = 0; state.capsized = 0; state.righting = 0; state.rt = 0; state.lastGybe = { time: -1, kick: 0, crossed: false }; state.stopSide = Math.sign(state.boom) || 1; state.rollAmp = 0;
 }
 
 // Запасной порыв без привязки к месту (для проверок без сцены)
@@ -381,8 +382,10 @@ export function step(state, ctl, dt, env = null) {
       const outward = Math.sign(bm) * w;
       if (outward > 1.2) {                                            // гик с разгона упёрся в шкот: рывок передаётся корпусу
         if (!ctl.lockHeading) r -= B.boomI * w / B.Izz * 0.9;
-        state.lastGybe = { time: state.time, kick: outward };
+        // перелёт — это когда гик упёрся в шкот не на том борту, где упирался в прошлый раз
+        state.lastGybe = { time: state.time, kick: outward, crossed: Math.sign(bm) !== state.stopSide };
       }
+      state.stopSide = Math.sign(bm);
       bm = Math.sign(bm) * lim; if (outward > 0) w = 0;
     }
     state.boom = bm; state.boomRate = w;
@@ -413,7 +416,7 @@ export function step(state, ctl, dt, env = null) {
         } else {
           const tw = norm180(windFrom - state.heading), sd = tw >= 0 ? 1 : -1, sh = ctl.autoSheet ? 75 : Math.max(B.boomMin, ctl.sheet);
           state.capsized = 0; state.side = sd; state.sailSide = sd; state.sheetNow = Math.max(sh, 60);
-          state.boom = -sd * Math.min(state.sheetNow, Math.abs(tw)); state.boomRate = 0; state.taut = 0;
+          state.boom = -sd * Math.min(state.sheetNow, Math.abs(tw)); state.boomRate = 0; state.taut = 0; state.stopSide = Math.sign(state.boom) || 1;
           state.crewY = sd * 0.35; state.heelMoment = 0; state.depower = ctl.autoSheet ? 30 : 0;
           state.heel = state.capsizeSide * 7; state.rollRate = -state.capsizeSide * 10; state.vf = 0.2; state.vs = 0; state.yawRate = 0; state.rollAmp = 0;
           state.flop = state.time - 3;

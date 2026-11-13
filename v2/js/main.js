@@ -670,8 +670,9 @@ function simulate(dt) {
   if (!out || out.AWS === undefined) out = step(state, ctl, 0, env);
   if (state.lastGybe.time !== lastGybeSeen) {
     lastGybeSeen = state.lastGybe.time;
-    if (state.lastGybe.kick > 0.8) audio.thud(state.lastGybe.kick);
-    if (state.lastGybe.kick > 1.6) toast(state.lastGybe.kick > 2.8 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
+    // гик, ушедший под ветер на своём борту, тоже стукает в шкот, но тише, и это не перелёт
+    if (state.lastGybe.kick > 0.8) audio.thud(state.lastGybe.kick * (state.lastGybe.crossed ? 1 : 0.4));
+    if (state.lastGybe.crossed && state.lastGybe.kick > 1.6) toast(state.lastGybe.kick > 2.8 ? 'Гик ударил! Перед поворотом подбирайте шкот' : 'Гик перелетел', false, 2200);
   }
   updateTraining(out, dt, t);
 
