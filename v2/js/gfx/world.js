@@ -180,7 +180,7 @@ export function createWorld(canvas, { antialias = true } = {}) {
   pipeline.fxaaEnabled = true;
 
   // ---- время суток ----
-  const state = { sky: null, skyKey: '', cloudX: 0, cloudZ: 0, flipMirror: 0, flipShadow: 0, fx: { shadow: true, mirror: true, foam: true, bloom: true } };
+  const state = { shift: 0, sky: null, skyKey: '', cloudX: 0, cloudZ: 0, flipMirror: 0, flipShadow: 0, fx: { shadow: true, mirror: true, foam: true, bloom: true } };
   const v3 = (a) => new B.Vector3(a[0], a[1], a[2]);
   let envCube = null;
   const skyMats = [skyMat, oceanMat];           // материалы, которым нужны цвета неба; берег добавляет сюда свой
@@ -221,7 +221,8 @@ export function createWorld(canvas, { antialias = true } = {}) {
     const wa = (f.windFrom + 180) * DEG, wx = Math.sin(wa), wz = -Math.cos(wa);
     // небо и вода стоят вокруг камеры; сетка воды переезжает целыми метрами, волны при этом считаются в мировых координатах
     skyDome.position.copyFrom(camera.position); skyDome.position.y = 0;
-    ocean.position.set(Math.round(f.x), 0, Math.round(f.z));
+    // сетка переезжает на целое число своих ближних ячеек (0,375 м): волны у лодки каждый раз попадают в те же вершины и не «дышат»
+    ocean.position.set(Math.round(f.x / 0.375) * 0.375, 0, Math.round(f.z / 0.375) * 0.375);
     state.cloudX += wx * dt * 0.0016; state.cloudZ += wz * dt * 0.0016;
     U.cloud.set(state.cloudX % 1, state.cloudZ % 1, s.cloud);
     skyMat.setVector3('uCloudP', U.cloud); oceanMat.setVector3('uCloudP', U.cloud);
@@ -232,14 +233,18 @@ export function createWorld(canvas, { antialias = true } = {}) {
     oceanMat.setVector2('uPivot', U.pivot); oceanMat.setVector2('uBoatFwd', U.fwd); oceanMat.setVector3('uBoatPlane', U.plane); oceanMat.setFloat('uBoatMask', env.boat.mask);
     // рябь едет по ветру; сдвиг считается от опорной точки, которая сама едет с лодкой
     ripT += dt;
-    const px = env.pivotX, pz = env.pivotZ, k1 = ripT * 0.05, k2 = ripT * 0.21;
-    U.ripple.set((px * 0.105 + wx * k1) % 1, (pz * 0.105 + wz * k1) % 1, ((px * 0.8 - pz * 0.6) * 0.41 + (wx * 0.8 - wz * 0.6) * k2) % 1, ((px * 0.6 + pz * 0.8) * 0.41 + (wx * 0.6 + wz * 0.8) * k2) % 1);
+    // Всё, что лежит на поверхности (три слоя ряби, шумы пены, полосы), сносится под ветер с одной скоростью, 0,3 м/с:
+    // у воды одна система отсчёта, слои не ползут навстречу друг другу. У слоя с масштабом m сдвиг равен −m·w·0,3·t.
+    const px = env.pivotX, pz = env.pivotZ, D = ripT * 0.3, rx = wx * 0.8 - wz * 0.6, rz = wx * 0.6 + wz * 0.8;
+    U.ripple.set((px * 0.105 - wx * 0.105 * D) % 1, (pz * 0.105 - wz * 0.105 * D) % 1, ((px * 0.8 - pz * 0.6) * 0.41 - rx * 0.41 * D) % 1, ((px * 0.6 + pz * 0.8) * 0.41 - rz * 0.41 * D) % 1);
     oceanMat.setVector4('uRipple', U.ripple);
-    // третий слой ряби и шумы пены: у каждого свой масштаб и поворот, поэтому и сдвиг опорной точки у каждого свой
-    const rx = wx * 0.8 - wz * 0.6, rz = wx * 0.6 + wz * 0.8, k3 = ripT * 0.33;
-    U.ripB.set((pz * 1.37 + wz * k3) % 1, (-px * 1.37 - wx * k3) % 1, (px * 0.31 + wx * k1 * 2) % 1, (pz * 0.31 + wz * k1 * 2) % 1);
-    U.ripC.set(((px * 0.8 - pz * 0.6) * 0.9 - rx * k2) % 1, ((px * 0.6 + pz * 0.8) * 0.9 - rz * k2) % 1, (px * 1.7 + rx * k2) % 1, (pz * 1.7 + rz * k2) % 1);
-    oceanMat.setVector4('uRipB', U.ripB); oceanMat.setVector4('uRipC', U.ripC); oceanMat.setFloat('uDriftT', ripT * 0.35);
+    U.ripB.set((pz * 1.37 - wz * 1.37 * D) % 1, (-px * 1.37 + wx * 1.37 * D) % 1, (px * 0.31 - wx * 0.31 * D) % 1, (pz * 0.31 - wz * 0.31 * D) % 1);
+    U.ripC.set(((px * 0.8 - pz * 0.6) * 0.9 - rx * 0.9 * D) % 1, ((px * 0.6 + pz * 0.8) * 0.9 - rz * 0.9 * D) % 1, (px * 1.7 - wx * 1.7 * D) % 1, (pz * 1.7 - wz * 1.7 * D) % 1);
+    oceanMat.setVector4('uRipB', U.ripB); oceanMat.setVector4('uRipC', U.ripC); oceanMat.setFloat('uDriftT', D);
+    // сколько воды проходит мимо камеры за кадр: по этому мелкий узор сглаживается на ходу
+    const stepM = state.shiftForce !== undefined ? state.shiftForce : Math.abs(f.speed || 0) * Math.min(dt, 0.05);
+    state.shift += (stepM - state.shift) * (state.shiftForce !== undefined ? 1 : 0.15);
+    oceanMat.setFloat('uShift', state.shift);
     U.sea.set(env.whitecap, env.gustOn, f.windKn, env.ampTotal); oceanMat.setVector4('uSea', U.sea);
     oceanMat.setVector3('uCam', camera.position);
     U.screen.set(engine.getRenderWidth(), engine.getRenderHeight()); oceanMat.setVector2('uScreen', U.screen);

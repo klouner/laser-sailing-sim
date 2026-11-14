@@ -129,6 +129,10 @@ uniform sampler2D uNormalTex; uniform sampler2D uFoamTex; uniform sampler2D uMir
 uniform vec4 uRipple;                 // сдвиги двух слоёв ряби
 uniform vec4 uRipB; uniform vec4 uRipC;       // сдвиги третьего слоя ряби и шумов пены: все узоры стоят на воде, а не едут с лодкой
 uniform float uDriftT;                // на сколько метров ветер снёс то, что плавает на поверхности
+uniform float uShift;                 // сколько метров вода проходит мимо камеры за один кадр
+// Узор, который за кадр сдвигается больше чем на свой шаг, глаз видит стоящим или бегущим назад (как колесо в кино).
+// Поэтому на ходу мелкие детали берутся из более грубых уровней текстуры: остаётся только то, что успевает читаться.
+float mipFor(float scale) { return clamp(log2(max(1.0, uShift * scale * 256.0 * 2.5)), 0.0, 7.0); }
 uniform vec4 uFoamWin;                // центр окна пены, размер, включено
 uniform mat4 uShadowM; uniform vec4 uFx;      // тень на воде, отражение лодки, переворот отражения, переворот тени
 uniform vec4 uSea;                    // барашки, порывы включены, ветер в узлах, суммарная амплитуда
@@ -148,8 +152,8 @@ void main() {
 
   // мелкая рябь: два слоя карты нормалей под углом друг к другу, едут по ветру с разной скоростью
   vec2 q2 = vec2(r.x * 0.8 - r.y * 0.6, r.x * 0.6 + r.y * 0.8);
-  vec3 d1 = texture2D(uNormalTex, r * 0.105 + uRipple.xy).xyz * 2.0 - 1.0;
-  vec3 d2 = texture2D(uNormalTex, q2 * 0.41 + uRipple.zw).xyz * 2.0 - 1.0;
+  vec3 d1 = texture2D(uNormalTex, r * 0.105 + uRipple.xy, mipFor(0.105)).xyz * 2.0 - 1.0;
+  vec3 d2 = texture2D(uNormalTex, q2 * 0.41 + uRipple.zw, mipFor(0.41)).xyz * 2.0 - 1.0;
   // кильватерный след: значение из текстуры пены нужно раньше всего остального, по нему гладится рябь
   float wake = 0.0;
   if (uFoamWin.w > 0.5) {
@@ -158,9 +162,10 @@ void main() {
   }
   float trail = smoothstep(0.015, 0.2, wake);                      // взбаламученная вода за кормой: гладкая и светлая
   float rip = (0.2 + 0.75 * smoothstep(1.0, 16.0, uSea.z)) * (1.0 + 0.7 * gP - 0.55 * gL) * (1.0 - 0.72 * trail);
-  vec3 d3 = texture2D(uNormalTex, vec2(r.y, -r.x) * 1.37 + uRipB.xy).xyz * 2.0 - 1.0;
+  vec3 d3 = texture2D(uNormalTex, vec2(r.y, -r.x) * 1.37 + uRipB.xy, mipFor(1.37)).xyz * 2.0 - 1.0;
   float near = 1.0 / (1.0 + dist * 0.06);
-  vec2 dn = (d1.xy * 0.6 + d2.xy * 0.52 + d3.xy * 0.34 * near) * rip;
+  // крупный слой ряби несёт главное: по нему видно, как вода идёт мимо; мелкие только добавляют фактуру вблизи
+  vec2 dn = (d1.xy * 0.78 + d2.xy * 0.46 + d3.xy * 0.26 * near) * rip;
   n = normalize(vec3(n.x + dn.x, n.y, n.z + dn.y));
 
   float ndv = max(dot(n, V), 0.02);
@@ -207,7 +212,7 @@ void main() {
   vec3 col = mix(body, refl * (1.0 - 0.22 * gP), fres) + sun;
 
   // пена: барашки на сжатых гребнях и след лодки
-  float nz = texture2D(uNoise, r * 0.31 + uRipB.zw).r, nz2 = texture2D(uNoise, q2 * 0.9 + uRipC.xy).g;
+  float nz = texture2D(uNoise, r * 0.31 + uRipB.zw, mipFor(0.31)).r, nz2 = texture2D(uNoise, q2 * 0.9 + uRipC.xy, mipFor(0.9)).g;
   float jt = mix(0.16, 0.6, uSea.x);
   // барашки только на вершинах крупных гребней, пятнами, а не россыпью точек
   float foam = uSea.x * smoothstep(jt + 0.12, jt - 0.08, jac + (nz - 0.5) * 0.3) * smoothstep(0.5, 0.9, crest) * smoothstep(0.35, 0.6, nz2);
@@ -216,7 +221,7 @@ void main() {
     if (fu.x > 0.0 && fu.x < 1.0 && fu.y > 0.0 && fu.y < 1.0) {
       float wf = wake;
       // пена рвётся шумом двух масштабов: у кормы плотная, дальше распадается на клочья
-      float nf = texture2D(uNoise, r * 1.7 + uRipC.zw).b;
+      float nf = texture2D(uNoise, r * 1.7 + uRipC.zw, mipFor(1.7)).b;
       foam = max(foam, smoothstep(0.3, 0.78, wf * (0.35 + 0.9 * nz + 0.55 * nf) + wf * wf * 0.35 - nz2 * 0.16) * 0.92);
     }
   }
@@ -226,11 +231,11 @@ void main() {
     vec2 wd = uWindMark.xy, pw = vW.xz + wd * uDriftT;
     float al = dot(pw, wd), ac = dot(pw, vec2(-wd.y, wd.x));
     float lane = texture2D(uNoise, vec2(ac * 0.045, al * 0.0045)).g, lane2 = texture2D(uNoise, vec2(ac * 0.16 + 0.37, al * 0.017)).b;
-    float fine = texture2D(uNoise, pw * 0.83).r;
+    float fine = texture2D(uNoise, pw * 0.4, mipFor(0.4)).r;
     float streak = smoothstep(0.6, 0.8, lane) * smoothstep(0.42, 0.7, lane2) * (0.45 + 0.55 * fine) * smoothstep(4.0, 12.0, uSea.z);
-    float fleck = smoothstep(0.78, 0.92, texture2D(uNoise, vec2(ac * 0.19 + 0.21, al * 0.05)).r) * (0.45 + 0.55 * fine);      // клочья пены, вытянутые по ветру
+    float fleck = smoothstep(0.74, 0.9, texture2D(uNoise, vec2(ac * 0.19 + 0.21, al * 0.05)).r) * (0.5 + 0.5 * fine);      // клочья пены, вытянутые по ветру
     float farK = 1.0 / (1.0 + dist * dist * 0.00012);
-    foam = max(foam, (streak * 0.25 + fleck * 0.34) * farK * (1.0 - 0.8 * trail));
+    foam = max(foam, (streak * 0.26 + fleck * 0.4) * farK * (1.0 - 0.8 * trail));
   }
   vec3 foamCol = (uSunCol * 0.34 * max(uSunDir.y, 0.1) * (0.35 + 0.65 * lit) + uHorizon * 0.45);
   col = mix(col, foamCol, foam);
@@ -287,7 +292,7 @@ void main() {
   gl_FragColor = vec4(col, alpha);
 }
 `;
-export const OCEAN_UNIFORMS = ['world', 'viewProjection', 'uCam', 'uScreen', 'uRipple', 'uRipB', 'uRipC', 'uDriftT', 'uFoamWin', 'uShadowM', 'uFx', 'uSea', 'uDeep', 'uScatter',
+export const OCEAN_UNIFORMS = ['world', 'viewProjection', 'uCam', 'uScreen', 'uRipple', 'uRipB', 'uRipC', 'uDriftT', 'uShift', 'uFoamWin', 'uShadowM', 'uFx', 'uSea', 'uDeep', 'uScatter',
   'uCompass', 'uWindMark', 'uMarks', 'uMarkCol', 'uLine', 'uLineA', ...SKY_UNIFORMS, ...WAVE_UNIFORMS];
 export const OCEAN_SAMPLERS = ['uNoise', 'uNormalTex', 'uFoamTex', 'uMirror', 'uShadowMask'];
 
