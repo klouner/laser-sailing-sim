@@ -1,0 +1,6 @@
+{
+  "name": "laser3d-checks",
+  "private": true,
+  "description": "Проверки второй версии тренажёра в браузере",
+  "dependencies": { "playwright": "^1.50.0" }
+}
